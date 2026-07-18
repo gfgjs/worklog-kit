@@ -1,0 +1,51 @@
+# 产物可复现门(P2 判据之四;设计方案 §12)。
+# 独立于 ci.yml:hosted 矩阵因 billing 阻断整体红(D-006 裁定不管),
+# 本 workflow 只跑 self-hosted,互不牵连——billing 恢复后两边各自绿。
+# 判据:同一 commit 上,生成器连跑两次、两次独立 run,产物字节 hash 全一致。
+name: repro
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 最小权限(R6:workflows 收窄):本 workflow 只读代码、传 artifact,无需写权限
+permissions:
+  contents: read
+
+# R6-17:self-hosted 无 OS label,Windows runner 默认 pwsh——下方 rm -rf/mv/进程替换/
+# sha256sum 全是 bash 语法,必红。钉 bash(Git Bash 随 git 必在)而非钉 Linux label:
+# 后者在只有 Windows runner 的仓会永久排队。
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  repro:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # step 名不写套件数:selftest 是 SUITES 注册制,数字写死在这里必漂(曾写「全 8 套」,实为 11 套)
+      - name: 自检(全量套件,含 e2e 与 build-index)
+        run: node bin/worklog.mjs selftest
+      - name: 双门
+        run: |
+          node bin/worklog.mjs check
+          node bin/worklog.mjs index check
+      - name: 同 run 两次生成,字节一致
+        run: |
+          node bin/worklog.mjs index build
+          rm -rf "$RUNNER_TEMP/gen-1"
+          mv .worklog/generated "$RUNNER_TEMP/gen-1"
+          node bin/worklog.mjs index build
+          diff <(cd "$RUNNER_TEMP/gen-1" && sha256sum *) <(cd .worklog/generated && sha256sum *)
+      - name: hash 摘要(跨 run 比对用)
+        run: |
+          { echo '```'; sha256sum .worklog/generated/*; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          sha256sum .worklog/generated/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: generated-index-${{ github.sha }}-run${{ github.run_attempt }}
+          path: .worklog/generated/

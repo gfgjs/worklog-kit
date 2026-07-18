@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gfgjs/worklog-kit/schema/worklogrc.v5.schema.json",
+  "title": "worklog-kit 项目配置 v5(.worklogrc.jsonc)",
+  "description": "当前版本。机器面契约锁 ASCII(字段名/枚举名/元模型槽位);展示面(报错/索引标签)由 locales/<lang>.json 本地化。元模型收敛、实例可配(D-003)。v4→v5 变更:`index` 对象新增 `mode`(索引形态档:invariant=手工索引 + 不变量门,MVP 默认;generated=`index build` 生成式索引,产物不入库 C-3)与 `outDir`(生成物专用目录,建议仓根 .worklog/generated,不得位于 docsDir 内)。缺省 mode=invariant,存量仓行为不变。档间切换是数据布局迁移不是配置开关(R3-3):改 mode 为 generated 后跑 `worklog upgrade` 完成 todo→status 分片迁入。参见设计方案 §4.1 item3/item4、§7.2。",
+  "type": "object",
+  "required": ["schemaVersion", "docsDir", "dirs", "status", "types", "dispositions"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 5,
+      "description": "配置/数据布局版本;upgrade 迁移按此逐级走(R2-M3)。只给**元模型**编号——增删 types/dispositions 条目是实例变更,不触发升版(D-003)。const 钉本 schema 对应的版本:编辑器里 $schema 指错版本时当场标红。"
+    },
+    "lang": {
+      "type": "string",
+      "description": "展示面语言;MVP 仅 zh。",
+      "default": "zh"
+    },
+    "docsDir": {
+      "type": "string",
+      "description": "受治理文档根目录。须为仓内相对路径(不得绝对路径或 ..)。",
+      "default": "docs"
+    },
+    "dirs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "docs 下的类型目录集合。**机器真源**:索引门校验 config.dirs ↔ 目录职责表 ↔ 实际目录三方一致(R5-M4);init 据它 stamp 目录。"
+    },
+    "status": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "活区文档 status 枚举(机器面 canonical;建议 ASCII)。"
+    },
+    "deprecatedStatuses": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "标记为「已死」的 status;活区出现即须移入 archive/。",
+      "default": ["superseded"]
+    },
+    "types": {
+      "type": "array",
+      "description": "文档 type 元模型(v2:对象数组)。实例可配、元模型固定(D-003)。",
+      "items": {
+        "type": "object",
+        "required": ["name", "canBeAuthoritative"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "description": "frontmatter type 字段的 canonical 值。" },
+          "canBeAuthoritative": {
+            "type": "boolean",
+            "description": "该 type 的文档能否承载 authoritative: true。§7.2「每 (line, authorityScope) 至多一个 active+authoritative」据此判定——把「谁能当权威」做成显式槽位,门禁便不必靠 type 名字的语义猜测。"
+          }
+        }
+      }
+    },
+    "dispositions": {
+      "type": "array",
+      "description": "closeout 处置规则(结构化;元模型稳定,规则内容可配——R2-C5)。",
+      "items": {
+        "type": "object",
+        "required": ["name", "targetKind"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "description": "处置名;跨条目唯一(它是规则主键)。" },
+          "targetKind": {
+            "enum": ["docs", "fixed", "line-status", "frozen-ref", "none"],
+            "description": "docs=仓根相对路径且验存 / fixed=配置写死的单一靶点 / line-status=按任务 line 求解的靶点(D-014,需 statusDir)/ frozen-ref=repo:<路径>@<commit> 只验 grammar / none=须 N-A 理由。全部 repo: 路径共用仓根 containment 断言(§7.1)。"
+          },
+          "target": {
+            "type": "string",
+            "description": "targetKind=fixed 时的固定靶点(如 docs/todo.md);须为仓内相对路径。其他 kind 不得声明它——不会被读,是死配置。"
+          },
+          "statusDir": {
+            "type": "string",
+            "description": "targetKind=line-status 时的分片根目录(如 docs/status)。靶点 = <statusDir>/<slug(任务 line)>.md,由 validator 求解并验存;slug 规则见 D-007(中文一等公民 + NFC 归一)。"
+          },
+          "reasonRequired": {
+            "type": "boolean",
+            "description": "targetKind=none 时须填 N-A 理由。"
+          }
+        }
+      }
+    },
+    "sourceRoots": {
+      "description": "check-docs 1b 代码引用扫描的源码根:\"auto\"=探测顶层 + 下方排除表,或显式字符串数组。",
+      "oneOf": [
+        { "const": "auto" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "default": "auto"
+    },
+    "sourceExclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "sourceRoots=auto 时排除的构建/依赖/工具目录。"
+    },
+    "profile": {
+      "enum": ["strict", "brownfield"],
+      "description": "门禁默认档(R2-M1;D-002 四档砍两档:greenfield 并入 strict,advisory 降为 --warn-only CLI 标志)。strict=一切违规 enforce、无视 baseline;brownfield=命中 .worklog-baseline.json 的存量 per-file 违规豁免(单列计数,不静默),其余 enforce。图不变量永不豁免(D-013)。",
+      "default": "strict"
+    },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "索引配置:章节标题约定(展示面,随语言可配)+ 索引形态档(v5 起)。",
+      "properties": {
+        "dirTableHeading": { "type": "string" },
+        "archivedHeading": { "type": "string" },
+        "mode": {
+          "enum": ["invariant", "generated"],
+          "description": "索引形态档(§4.1 M-4;D-009):invariant=手工索引 + 不变量门(MVP 默认);generated=`index build` 从 frontmatter 生成 INDEX/STATUS(产物不入库,C-3)。裸 `worklog index` 按此档别名并打印所指。档间切换须跑 `worklog upgrade`(数据布局迁移,R3-3)。",
+          "default": "invariant"
+        },
+        "outDir": {
+          "type": "string",
+          "description": "生成物专用输出目录(artifact contract,R5-M7)。须为仓内相对路径,且不得位于 docsDir 之内(生成物无 frontmatter,放进受治理目录即被门判红)。产物应列入 .gitignore 不入库。",
+          "default": ".worklog/generated"
+        }
+      }
+    },
+    "archiveBannerMarkers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "archive/ 文件文首须含的状态横幅标记之一。"
+    }
+  }
+}

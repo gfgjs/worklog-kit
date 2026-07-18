@@ -1,0 +1,13 @@
+node_modules/
+
+# 备份文件(install-skills --force 产出)
+*.bak-*
+*.tmp-*
+# npm pack 产物与发包 token(.npmrc 是 token 入库向量)
+*.tgz
+.npmrc
+# worklog-kit 生成物不入库(C-3)
+.worklog/generated/
+
+# 公私双源同步的本地敏感词表(tools/sync-public.mjs 硬门)——真实值永不入库/导出
+.sync-blocklist.local.json

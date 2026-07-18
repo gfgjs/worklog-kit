@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/gfgjs/worklog-kit/schema/worklogrc.v1.schema.json",
+  "title": "worklog-kit 项目配置 v1(.worklogrc.jsonc)",
+  "description": "⚠️ v1 已冻结,新仓请用 v2(worklogrc.v2.schema.json)。本文件只为读懂存量 v1 配置而保留——`worklog upgrade` 据它判定迁移起点。v1 与 v2 的差别:v1 的 types 是字符串数组(无 canBeAuthoritative 槽位),targetKind 无 line-status。机器面契约锁 ASCII;展示面由 locales/<lang>.json 本地化。参见设计方案 §5(R3-1)、§7.4(R2-C5/D-003)。",
+  "type": "object",
+  "required": ["schemaVersion", "docsDir", "dirs", "status", "types", "dispositions"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "配置/数据布局版本;upgrade 迁移按此逐级走(R2-M3)。const 钉本 schema 对应的版本:编辑器里 $schema 指错版本时当场标红,而非静默接受任意整数。"
+    },
+    "lang": {
+      "type": "string",
+      "description": "展示面语言;MVP 仅 zh。",
+      "default": "zh"
+    },
+    "docsDir": {
+      "type": "string",
+      "description": "受治理文档根目录。",
+      "default": "docs"
+    },
+    "dirs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "docs 下的类型目录集合(目录职责表须与之一致)。"
+    },
+    "status": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "活区文档 status 枚举(机器面 canonical;建议 ASCII)。"
+    },
+    "deprecatedStatuses": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "标记为「已死」的 status;活区出现即须移入 archive/。",
+      "default": ["superseded"]
+    },
+    "types": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "文档 type 枚举。"
+    },
+    "dispositions": {
+      "type": "array",
+      "description": "closeout 处置规则(结构化;元模型稳定,规则内容可配——R2-C5)。",
+      "items": {
+        "type": "object",
+        "required": ["name", "targetKind"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string" },
+          "targetKind": {
+            "enum": ["docs", "fixed", "frozen-ref", "none"],
+            "description": "docs=仓根相对路径且验存 / fixed=固定靶点 / frozen-ref=repo:<路径>@<commit> 只验 grammar / none=须 N-A 理由。"
+          },
+          "target": {
+            "type": "string",
+            "description": "targetKind=fixed 时的固定靶点(如 docs/todo.md)。"
+          },
+          "reasonRequired": {
+            "type": "boolean",
+            "description": "targetKind=none 时须填 N-A 理由。"
+          }
+        }
+      }
+    },
+    "sourceRoots": {
+      "description": "check-docs 1b 代码引用扫描的源码根:\"auto\"=探测顶层 + 默认排除,或显式字符串数组。",
+      "oneOf": [
+        { "const": "auto" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "default": "auto"
+    },
+    "sourceExclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "sourceRoots=auto 时排除的构建/依赖目录。"
+    },
+    "profile": {
+      "enum": ["strict", "brownfield"],
+      "description": "门禁默认档(R2-M1;D-002 四档砍两档:greenfield 并入 strict,advisory 降为 --warn-only CLI 标志)。MVP 仅实现 strict;brownfield 的 baseline 承载见设计方案 §7.5(R4-16)。",
+      "default": "strict"
+    },
+    "index": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "索引不变量门的章节标题约定(展示面,随语言可配)。",
+      "properties": {
+        "dirTableHeading": { "type": "string" },
+        "archivedHeading": { "type": "string" }
+      }
+    },
+    "archiveBannerMarkers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "archive/ 文件文首须含的状态横幅标记之一。"
+    }
+  }
+}

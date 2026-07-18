@@ -1,0 +1,72 @@
+// worklog-kit 项目配置。机器面(字段名/枚举值/disposition 元模型)锁 ASCII canonical;
+// 报错与索引标签等展示面由 locales/<lang>.json 本地化(设计方案 §5,R3-1)。
+// 校验 schema:随 schemaVersion 版本化(见下方 $schema 字段;升版由 worklog upgrade 逐级迁移)。
+{
+  // $schema 指公开仓 raw URL(B15):非 Node 消费仓(如 Rust/Tauri)没有 node_modules,
+  // 相对路径必悬空;URL 对一切消费仓生效。升版时 upgrade 只换文件名段,URL 前缀原样。
+  "$schema": "https://raw.githubusercontent.com/gfgjs/worklog-kit/main/schema/worklogrc.v5.schema.json",
+  "schemaVersion": 5,
+  "lang": "zh",
+
+  "docsDir": "docs",
+  // docs 下的类型目录;「目录职责」表须与实际目录一致(索引不变量门校验)。
+  "dirs": ["designs", "reviews", "decisions", "runbooks", "lines", "planning", "worklogs", "archive"],
+
+  // 活区文档 status 枚举。ASCII canonical;中文展示经 catalog 映射。
+  "status": ["draft", "active", "snapshot", "superseded", "archived"],
+  // 标记为「已死」的 status:活区出现即须移入 archive/。
+  "deprecatedStatuses": ["superseded"],
+
+  // 文档 type 元模型(v2:对象数组)。`canBeAuthoritative` = 该 type 的文档能否承载
+  // `authoritative: true`;§7.2「每 (line, authorityScope) 至多一个 active+authoritative」
+  // 据此判定,不再靠 type 名字猜语义(D-003)。判据 = 「它是不是某条线在某范围内的**当前答案**」。
+  "types": [
+    { "name": "design", "canBeAuthoritative": true },
+    { "name": "review", "canBeAuthoritative": false },
+    { "name": "decision", "canBeAuthoritative": true },
+    { "name": "runbook", "canBeAuthoritative": true },
+    { "name": "canon", "canBeAuthoritative": true },
+    { "name": "working-memory", "canBeAuthoritative": false },
+    { "name": "closeout", "canBeAuthoritative": false },
+    { "name": "index", "canBeAuthoritative": false },
+    { "name": "line", "canBeAuthoritative": false },
+    { "name": "experience", "canBeAuthoritative": true }
+  ],
+
+  // closeout 处置规则(结构化)。元模型(name/targetKind)稳定;规则内容开发期可增改。
+  //   targetKind: docs=仓根相对路径且验存 / fixed=配置写死的单一靶点
+  //             / line-status=按任务 line 求解的靶点(需 statusDir;P2 生成式档用)
+  //             / frozen-ref=repo:<路径>@<commit> 只验 grammar / none=须 N-A 理由
+  "dispositions": [
+    { "name": "experience", "targetKind": "docs" },
+    { "name": "decision", "targetKind": "docs" },
+    { "name": "design", "targetKind": "docs" },
+    { "name": "runbook", "targetKind": "docs" },
+    { "name": "completed", "targetKind": "docs" },
+    { "name": "todo", "targetKind": "fixed", "target": "docs/todo.md" },
+    { "name": "code", "targetKind": "frozen-ref" },
+    { "name": "test", "targetKind": "frozen-ref" },
+    { "name": "no-promotion", "targetKind": "none", "reasonRequired": true }
+  ],
+
+  // check-docs 1b 代码引用扫描:"auto"=探测顶层源码目录 + 下方排除表;或显式列出代码根。
+  "sourceRoots": "auto",
+  "sourceExclude": ["node_modules", "dist", "build", "target", ".git", ".venv", "vendor", "coverage", ".claude", ".github", ".worklog"],
+
+  // 门禁默认档:strict | brownfield(D-002 两档;MVP 仅实现 strict)。
+  "profile": "strict",
+
+  // 索引配置:章节标题约定(展示面,随语言可配)+ 索引形态档(v5 起,§4.1 M-4)。
+  //   mode: invariant=手工索引 + 不变量门(MVP 默认)| generated=`index build` 生成式索引
+  //        (产物不入库 C-3;改档后须跑 `worklog upgrade` 完成数据布局迁移,R3-3)。
+  //   outDir: 生成物专用目录;不得位于 docsDir 内,产物应列入 .gitignore。
+  "index": {
+    "dirTableHeading": "目录职责",
+    "archivedHeading": "已归档任务",
+    "mode": "invariant",
+    "outDir": ".worklog/generated"
+  },
+
+  // archive/ 文件文首须含的状态横幅标记之一(中英默认并存)。
+  "archiveBannerMarkers": ["已归档", "已废弃", "已执行", "被推翻", "已过时", "archived", "superseded", "deprecated"]
+}

@@ -1,0 +1,18 @@
+# 本仓 CODEOWNERS(P3 阶段 5;方案 §4.3:治理 schema 文件与门禁脚本挂 owner 审)。
+# @gfgjs 为仓库真实账号(转公开时自占位 handle 校正,2026-07-18)。
+# 配合仓库设置 required reviews + merge queue(merge_group 已在 CI 注册)才有牙齿。
+
+# 引擎与门禁脚本(门禁自身另有 selftest 防回归)
+/src/ @gfgjs
+/bin/ @gfgjs
+/schema/ @gfgjs
+/templates/ @gfgjs
+/skills/ @gfgjs
+/locales/ @gfgjs
+
+# 治理配置与 CI
+/.worklogrc.jsonc @gfgjs
+/.github/ @gfgjs
+
+# 归档区:收口台账归档后冻结;owner 唯一收口的 review 面(E6 门咬声明一致性,这里咬「谁能批」)
+/docs/worklogs/ @gfgjs

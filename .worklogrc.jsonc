@@ -1,0 +1,62 @@
+// worklog-kit 自身的 dogfood 配置(吃自己狗粮:本工具治理本仓 docs/)。
+// 机器面锁 ASCII;本仓现役文档 frontmatter 已随之迁 ASCII 枚举。
+// 2026-07-16 由 `worklog upgrade` 升 v1 → v2 → … → v5(当时迁移重序列化丢注释,系手工补回;
+// F-005 已清偿 2026-07-17:升档改外科编辑,注释随迁保全,兜底整文重写才告警)。
+{
+  "$schema": "./schema/worklogrc.v5.schema.json",
+  "schemaVersion": 5,
+  "lang": "zh",
+  "docsDir": "docs",
+  // 机器真源:索引门校验 config.dirs ↔ docs/README 目录职责表 ↔ 实际目录三方一致(R5-M4)。
+  // status = 工作线滚动状态分片(generated 档,2026-07-16 由 upgrade 迁入,D-014/D-016)。
+  "dirs": ["designs", "lines", "planning", "reviews", "runbooks", "status", "worklogs"],
+  "status": ["draft", "active", "snapshot", "superseded", "archived"],
+  "deprecatedStatuses": ["superseded"],
+  // v2 元模型:canBeAuthoritative = 该 type 能否承载 `authoritative: true`(§7.2 权威唯一
+  // 据此判定)。判据 = 「它是不是某条线在某范围内的**当前答案**」——review 是时点快照、
+  // working-memory 是过程件、closeout 是台账、index 是生成物、rolling-status 是时点记录,故均为 false。
+  "types": [
+    { "name": "design", "canBeAuthoritative": true },
+    { "name": "review", "canBeAuthoritative": false },
+    { "name": "decision", "canBeAuthoritative": true },
+    { "name": "runbook", "canBeAuthoritative": true },
+    { "name": "canon", "canBeAuthoritative": true },
+    { "name": "working-memory", "canBeAuthoritative": false },
+    { "name": "closeout", "canBeAuthoritative": false },
+    { "name": "index", "canBeAuthoritative": false },
+    { "name": "line", "canBeAuthoritative": false },
+    { "name": "rolling-status", "canBeAuthoritative": false },
+    { "name": "experience", "canBeAuthoritative": true }
+  ],
+  // todo 处置 2026-07-16 由 upgrade 从 fixed(docs/todo.md)迁 line-status(D-014):
+  // 靶点 = docs/status/<slug(任务 line)>.md,validator 按任务 line 求解并验存。
+  "dispositions": [
+    { "name": "experience", "targetKind": "docs" },
+    { "name": "decision", "targetKind": "docs" },
+    { "name": "design", "targetKind": "docs" },
+    { "name": "runbook", "targetKind": "docs" },
+    { "name": "completed", "targetKind": "docs" },
+    { "name": "todo", "targetKind": "line-status", "statusDir": "docs/status" },
+    { "name": "code", "targetKind": "frozen-ref" },
+    { "name": "test", "targetKind": "frozen-ref" },
+    { "name": "no-promotion", "targetKind": "none", "reasonRequired": true }
+  ],
+  // dogfood 特例:本工具 src/templates 内含 disposition 默认靶点字面量(docs/todo.md 等),
+  // 属配置默认值而非导航引用;若 1b 扫描它们会自触发误报(experience §12 自扫描类)。
+  // 故不用 "auto"(它会连 src/ templates/ 一并扫进来)。
+  // `"."` = 只扫**仓根文件**(R4-11,§7.2 source universe):仓根 README 里指向 docs/ 的
+  // 导航链此前 1a(只走 docsDir 之下)与 1b(只收顶层目录)双盲,现由此收编;
+  // src/templates 的自扫描误报不受影响,其 1b 覆盖仍由 `worklog check --selftest` fixture 保证。
+  "sourceRoots": ["."],
+  "sourceExclude": ["node_modules", "dist", "build", "target", ".git", ".venv", "vendor", "coverage", ".claude", ".github", ".worklog"],
+  "profile": "strict",
+  // 索引形态档(§4.1 M-4):本仓 dogfood 生成式档——`worklog index build` 产 INDEX/STATUS
+  // 到 outDir(不入库,C-3);裸 `worklog index` 别名到 index check(D-009)。
+  "index": {
+    "dirTableHeading": "目录职责",
+    "archivedHeading": "已归档任务",
+    "mode": "generated",
+    "outDir": ".worklog/generated"
+  },
+  "archiveBannerMarkers": ["已归档", "已废弃", "已执行", "被推翻", "已过时", "archived", "superseded", "deprecated"]
+}

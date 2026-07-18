@@ -1,0 +1,47 @@
+# worklog-kit 文档治理门禁(由 `worklog init` stamp;按 profile 生成——本份为 <PROFILE> 档,R2-M4)。
+# 主干完整性(R2-C6):PR 分支跑门只是入口;多人仓须在仓库设置里开
+# required status checks + up-to-date-before-merge 或 merge queue,才能真正把
+# semantic merge conflict 挡在 main 之外——CI 已对 merge_group 事件注册同一套门。
+name: docs-governance
+
+# 最小权限(R7-10):门禁与 selftest 只读仓。不声明则继承仓库默认令牌权限,
+# 老仓默认常是 write——fork PR/复用场景下等于白给写权。
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group: # 拟合并结果上跑门(merge queue 要件,R2-C6)
+
+jobs:
+  gate:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # 门禁步:逐条 bare 跑,各自检查退出码(不用 shell 链吞码)。
+      #
+      # 调用**钉到精确包版本**(D-017)。不用裸 `npx worklog`:无本地 bin 时它会去
+      # registry 抓**最新**版——版本浮动 = 门禁判定浮动,今天绿明天红且无从复现;
+      # 且 `worklog` 这个 bin 名与包名不同,同名 bin 冲突时 npx 会静默跑别人的。
+      # `--package` 显式指定包、`--yes` 免交互确认。
+      #
+      # 不跑 `npm ci`:消费仓未必是 Node 项目(如 Rust/Tauri),不得假设它有依赖拓扑。
+      # 若你的仓本就是 Node 项目,可改为把 worklog-kit 钉进 devDependencies + `npm ci`
+      # 后跑本地 bin —— 同样满足「版本精确可复现」。
+      - run: npx --yes --package <WORKLOG_KIT_SPEC> worklog check
+      - run: npx --yes --package <WORKLOG_KIT_SPEC> worklog index
+      # <PROFILE_EXTRA>
+      # selftest 步:验证所装引擎自身的门禁逻辑(正负 fixture)。
+      # 注意:**不跑 `worklog skills --check`**——个人 skill 安装一致性属本机 doctor 检查,
+      # CI 的 fixture HOME 没有个人副本(R2-M4)。
+      - run: npx --yes --package <WORKLOG_KIT_SPEC> worklog selftest
