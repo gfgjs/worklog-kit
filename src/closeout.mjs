@@ -65,11 +65,26 @@ export function main({ root, config, t, args }) {
   const heading = indexHeadings(config).archivedHeading;
 
   const flipTargets = [...TRIO, 'closeout.md'].filter((f) => existsSync(join(dir, f)));
+  // worklogs README 登记行(插到「已归档任务」节末尾;摘要不给则留待填占位——
+  // 摘要是判断件,机械步只保证登记行存在且含反引号目录名,满足索引门)
+  const row = `- ${stripTaskDate(r.name)} — ${today} — ${summary || '(收口摘要待填,见 closeout.md 阶段结论)'} — \`${destName}/\``;
   console.log(t('closeout.cmdPlanned', { dir: rel, dest: relPath(root, dest) }));
   for (const f of flipTargets) console.log(`  · ${t('closeout.cmdStepFlip', { file: f })}`);
   console.log(`  · ${t('closeout.cmdStepMove')}`);
   console.log(`  · ${t('closeout.cmdStepReadme', { heading })}`);
-  if (dry) { console.log(t('closeout.cmdDryRun')); return 0; }
+  if (dry) {
+    // dry-run 展示投影登记行(不止步骤文字),让人先看清将写入什么(复审 §P1-06)
+    console.log(`  · ${t('closeout.cmdDryRow', { row })}`);
+    console.log(t('closeout.cmdDryRun'));
+    return 0;
+  }
+
+  // ── 事务化(复审 §P1-06/R7-08):先在工作树 mutate,双门复验**先于** git 暂存;
+  //    门红则回滚到 before-image(rename 迁回、status 复原、README 复原),用户拿到的是
+  //    原状态而非半完成工作树。git add 只在双门全绿后执行。 ─────────────────────
+  const beforeStatus = flipTargets.map((f) => ({ f, content: readFileSync(join(dir, f), 'utf8') }));
+  const readmeBefore = existsSync(readmeP) ? readFileSync(readmeP, 'utf8') : null;
+  let readmeModified = false;
 
   // 1. status → snapshot(BOM/行尾原样;无 status 行提示人工核,不静默)
   for (const f of flipTargets) {
@@ -81,9 +96,7 @@ export function main({ root, config, t, args }) {
   // 2. 归档迁移
   mkdirSync(wl, { recursive: true });
   renameSync(dir, dest);
-  // 3. worklogs README 登记行(插到「已归档任务」节末尾;摘要不给则留待填占位——
-  //    摘要是判断件,机械步只保证登记行存在且含反引号目录名,满足索引门)
-  const row = `- ${stripTaskDate(r.name)} — ${today} — ${summary || '(收口摘要待填,见 closeout.md 阶段结论)'} — \`${destName}/\``;
+  // 3. worklogs README 登记行
   if (!existsSync(readmeP)) {
     console.log(t('closeout.cmdReadmeMissing', { path: relPath(root, readmeP), row }));
   } else {
@@ -112,19 +125,32 @@ export function main({ root, config, t, args }) {
       if (!/\n$/.test(anchor)) lines[insertAt - 1] = `${anchor}${eol}`;
       lines.splice(insertAt, 0, `${row}${eol}`);
       writeAtomic(readmeP, lines.join(''));
+      readmeModified = true;
     }
   }
-  // 4. 尽力 git 暂存(失败降级为提醒;非 git 环境照常走完)
+  // 4. 双门复验(git add 之前——先验后暂存)
+  console.log('');
+  const c1 = checkDocs({ root, config, t, args: [] });
+  const c2 = checkIndex({ root, config, t, args: [] });
+  if (c1 || c2) {
+    // 门红:回滚 before-image。回滚本身失败则给人工恢复命令,不再静默半途。
+    try {
+      renameSync(dest, dir);
+      for (const { f, content } of beforeStatus) writeAtomic(join(dir, f), content);
+      if (readmeModified && readmeBefore !== null) writeAtomic(readmeP, readmeBefore);
+      console.log(`\n${t('closeout.cmdRolledBack', { dir: rel })}`);
+    } catch (e) {
+      console.error(`\n${t('closeout.cmdRollbackFailed', { msg: (e?.message ?? String(e)).split('\n')[0], dir: rel, dest: relPath(root, dest) })}`);
+    }
+    return 1;
+  }
+  // 5. 双门全绿才 git 暂存(尽力;非 git 环境照常走完)
   try {
     execFileSync('git', ['add', '-A', '--', rel, relPath(root, dest), relPath(root, readmeP)], { cwd: root, stdio: 'ignore' });
   } catch (e) {
     console.log(t('closeout.cmdGitSkipped', { msg: (e?.message ?? String(e)).split('\n')[0] }));
   }
-  // 5. 双门复验(进程内;门红则本命令 exit 1——机械步已落盘,红的是内容,交回人手)
-  console.log('');
-  const c1 = checkDocs({ root, config, t, args: [] });
-  const c2 = checkIndex({ root, config, t, args: [] });
   console.log(`\n${t('closeout.cmdReminders')}`);
   console.log(t('closeout.cmdDone', { dest: relPath(root, dest) }));
-  return c1 || c2 ? 1 : 0;
+  return 0;
 }

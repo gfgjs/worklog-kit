@@ -16,6 +16,7 @@ import { main as teamCmd } from '../src/team.mjs';
 import { main as closeoutCmd } from '../src/closeout.mjs';
 import { selftest as configSelftest } from '../src/lib/config.mjs';
 import { main as selftestAll } from '../src/selftest.mjs';
+import { mainStart, mainList, mainResume, mainNote, mainCheckpoint, mainNextId } from '../src/tasks.mjs';
 import { validateArgs } from '../src/lib/cliargs.mjs';
 
 const [, , cmd, ...args] = process.argv;
@@ -92,6 +93,25 @@ function dispatch() {
       // F-013:收口机械步。agent 环境下本命令的工具权限提示即「用户批准收口」按钮
       requireGoodConfig();
       return closeoutCmd({ root, config, t, args });
+    // ── 产品化机械命令(复审 §8.2):建档/清单/接续视图/分节追加/热区压缩/编号分配 ──
+    case 'start':
+      requireGoodConfig();
+      return mainStart({ root, config, t, args });
+    case 'list':
+      requireGoodConfig();
+      return mainList({ root, config, t, args });
+    case 'resume':
+      requireGoodConfig();
+      return mainResume({ root, config, t, args });
+    case 'note':
+      requireGoodConfig();
+      return mainNote({ root, config, t, args });
+    case 'checkpoint':
+      requireGoodConfig();
+      return mainCheckpoint({ root, config, t, args });
+    case 'next-id':
+      requireGoodConfig();
+      return mainNextId({ root, config, t, args });
     case 'upgrade':
       // `--selftest` 必须在真跑之前判。此前漏了这一支:`worklog upgrade --selftest`
       // 会被当成「带一个无关标志的真迁移」执行——施工时实测踩中,当场把本仓配置升版并

@@ -30,26 +30,28 @@ user-invocable: true
 
 ## 起步(建一套)
 
-1. 定任务名(中文可),剔除 `\ / : * ? " < > |`,空格→`-`。
-2. 建目录 `docs/planning/<今天 YYYY-MM-DD>-<任务名>/`;同名已存在则后缀 `-2`、`-3` 递增。
-3. 按 `.worklog/templates/` 三件套模板(`task_plan.md`/`findings.md`/`progress.md`)写入,填好 frontmatter 与任务实情——模板是骨架,内容必须当场填实,不留占位符。
-4. 告知用户目录路径。**不建索引、不写指针**:`ls docs/planning/` 即索引。
+1. `worklog start <任务名>`(中文可;命令自动消毒非法字符、日期前缀、撞名 `-2` 递增)。小型跨会话任务加 `--mode lite`(单文件 checkpoint)。无 CLI 环境才手工:按 `.worklog/templates/` 三件套模板建 `docs/planning/<今天 YYYY-MM-DD>-<任务名>/`。
+2. 模板是骨架,目标/阶段/需求**当场填实**,不留占位符。
+3. 告知用户目录路径。**不建索引、不写指针**:`worklog list`(或 `ls docs/planning/`)即索引。
 
 ## 干活中(凭判断,不搞仪式)
 
-- 阶段完成 → 翻 `task_plan.md` 该阶段状态;拍板决策 → 记决策表(一行:决策 + 理由)。
-- 有**丢了可惜**的发现 → 随手落 `findings.md`。多模态/网页内容读完即忘,值得留的当场写下。
+- 阶段完成 → 翻 `task_plan.md` 该阶段状态并**当场折叠**:checklist 细节压成一行(阶段名 + commit + 一句话结论)。细节证据已在 git/progress,留在 task_plan 即三处重复——折叠是去重不是删账。**折叠只吃过程,不吃契约**:可折 = 实现步骤、重复状态、已消费的探索过程、长工具输出;**不可折** = 验收标准、不变量、用户裁决、失败边界、未解决的错误、最终验证证据——这些即便有 commit 也留原文(commit message 常不含,且 shallow/squash/单文件交接时 git 指针可能不可达)。拍板决策 → 记决策表(一行:决策 + 理由)。
+- 有**丢了可惜**的发现 → 随手落 `findings.md`。多模态/网页内容读完即忘,值得留的当场写下。大段摘录(代码/日志/网页正文 >20 行)拆 `attachments/` 子文件(带轻 frontmatter),findings 正文只留一行索引——大段原文常驻正文,每轮读取重复计税。
+- findings 侦察项落进代码后,**当场**把该项折成一行 `✓consumed→<commit 或阶段>`。写时标记可靠(落地当下你知道它被谁消费);接续时靠猜跳读不可靠,不做。
+- `progress.md` 写指针不写复述:「做了」≤2 行 + commit 指针,设计要点只写 commit message 里没有的;「遗留」只写阶段号(定义在 task_plan)。同一信息不落第二处。
+- `progress.md` 顶部维护「前情」段(≤10 行:当前阶段、未解错误、关键指针),会话段收尾顺手刷新;旧会话段(最近 2 段以前)机械迁移交 `echo 新前情 | worklog checkpoint <任务> --stdin`——它把旧段原文照录迁 `progress-archive.md` 并替换前情段,原账不丢。接续只读前情+最近,archive 不进必读集。
 - 跑了验证(测试/typecheck/build)→ 结果与证据记 `progress.md`,错误与修法记错误账。
-- 有**耐久价值**的发现/决策(收口后仍值得进永久库的)→ 当场在 `findings.md` 候选表登记 `F-NNN`、在 `task_plan.md` 决策表标 `D-NNN`,宁多勿漏——收口时可裁 no-promotion,漏登记则门禁无从兜底。
+- 有**耐久价值**的发现/决策(收口后仍值得进永久库的)→ 当场在 `findings.md` 候选表登记 `F-NNN`、在 `task_plan.md` 决策表标 `D-NNN`,宁多勿漏——收口时可裁 no-promotion,漏登记则门禁无从兜底。编号取全仓全局序:`worklog next-id` 直接给,免为找号扫仓。
 - 任务目录内除三件套外的**手写辅助文件**须带合法轻 frontmatter(status/type/created)——门禁只豁免三件套。
-- 写小、写结论:增量追加用 Edit,别整文件重写;单件超 ~200 行(`worklog doctor` 会提示)是蒸馏信号——合并重复、把过程叙事压成结论,候选行与关键证据(报错原文、数据、链接)保留。**蒸馏是浓缩不是删账。**
+- 写小、写结论:**纯追加**首选 `worklog note <任务> --kind finding|decision|progress --stdin`——命令负责找对节(发现进 `## 发现` 不落候选表)、原子写、EOL 保形,内容全程当数据不进 shell 解析;无 CLI 时用 agent-native 编辑(Edit/apply_patch)**认准目标 H2 节尾**追加。禁固定 heredoc(`cat >> 文件 <<'EOF'`):内容里独占行 `EOF` 会提前闭合、Windows 无同形语法、盲追加落错节。改既有行用 Edit,别整文件重写。单件超 ~200 行或 est-token 超限(`worklog doctor` 会提示)是蒸馏信号——合并重复、把过程叙事压成结论,候选行与关键证据(报错原文、数据、链接)保留。**蒸馏是浓缩不是删账。**
 - 收到 compaction 预警时,把在途状态 flush 进 `progress.md` 再继续。
 - 三件套改动随当次工作 commit 一同入库(显式 pathspec 防并行竞态)。
 - 「回写文档」「更新三件套」「记录进展」类指令 = **本节的写账动作,不触发收口**。阶段完成 ≠ 任务收口——用户随时可能接续。
 
 ## 接续(/clear、compaction、新会话)
 
-1. 用户点名任务 → 读对应目录三件套再动手;没点名 → `ls docs/planning/` 列在施任务,多于一个就问。
+1. 用户点名任务 → `worklog resume <任务>` 一步输出分层热视图(task_plan 全文 + findings 全文 + progress 前情+最近 2 段);无 CLI 时手工同序读。不跳文件,只把分母做小。没点名 → `worklog list` 列在施任务,多于一个就问。
 2. **以文件为准,不信记忆**:上下文里的印象可能是压缩残影,三件套才是地面真相。
 3. 读完先对齐:当前阶段、下一步、有无未解决错误——对不上就先问用户。
 
@@ -57,19 +59,8 @@ user-invocable: true
 
 **授权前置(硬规则)**:收口是终局状态迁移(planning/=在施 → worklogs/=定案),**只在用户明确下达收口指令**(「收口」「归档任务」「closeout」)时执行。「回写文档」「更新三件套」「记录进展」「任务看起来做完了」都**不是**收口指令——它们属§干活中的写账。你判断任务似已完成时,至多**提议**收口并停下等批准:提议权归你,执行权归用户;接续任务的可能性永远存在,归档不由推断触发。
 
-收口=归档 + **蒸馏**:三件套是过程快照,耐久价值必须提升进永久库,否则死在归档里。
+收口=归档 + **逐候选蒸馏**:三件套是过程快照,耐久价值必须提升进永久库,否则死在归档里。**判断件先写好**(人/AI):候选账 `F-NNN`/`D-NNN`、`progress.md`「回顾」段、逐候选定去向并当场执行蒸馏写入、按 `.worklog/templates/closeout.md` 写 `closeout.md`(每候选恰好一行,D-012)。**机械步交命令**:`worklog closeout <任务> [--summary]`(status 翻转 + 迁 worklogs + README 登记 + 双门复验;closeout.md 缺席即拒;agent 环境下工具权限提示 = 收口批准按钮;命令不 commit,review 后显式 pathspec 提交)。去向枚举、门禁细则、逐步手册、误收口回滚见仓内 `docs/runbooks/closeout.md`——**热区不复述这套冷仪式**,纯手工无 AI 用户照该手册走同一流程。
 
-1. **补全候选账**:把该提升的项编好 `F-NNN`/`D-NNN`;`progress.md` 填「回顾」段。
-2. **逐候选蒸馏处置**:决定每个候选去向并**当场执行**——写入 experience/decisions/designs/runbooks/completed、登记 todo、落代码注释或测试;确无提升价值的裁 no-promotion 并写明理由。
-3. **写 `closeout.md`**(模板见 `.worklog/templates/closeout.md`):每个已声明候选**恰好一行**(D-012:ID 即行主键;一个发现要落多处就拆成多个候选、摘要互链)。门禁(`worklog check`)机械校验:候选全覆盖不重不漏、disposition 枚举、target grammar 与仓根 containment、docs 类验存、verified=yes(**含 no-promotion**)。
-4. `git mv` 整个任务目录到 `docs/worklogs/<日期>-<任务名>/`(日期换成收口日;`git mv` 保历史连续)。
-5. 三件套 frontmatter `status` 翻到 `snapshot`;归档后正文冻结,closeout 语义列(ID/disposition/理由)冻结——仅 docs 侧 target 因目标迁移可在同一移动 commit 更新。
-6. 在 `docs/worklogs/README.md` 的「已归档任务」登记一行(任务名 — 收口日 — 一句话摘要 — `目录名/`)。
-7. 回写滚动状态源的本线状态(fixed 档 = `docs/todo.md`;generated 档 = 本线 `docs/status/<slug>.md` 分片,靶点按任务 `line` 求解 D-014——以 `.worklogrc.jsonc` 的 `todo` 处置为准);disposition=todo 的候选登记也在这步一并落。
-8. commit(显式 pathspec,防并行会话暂存竞态)。
-
-> **无 AI 也能收口**:上述仪式不依赖本 skill——纯手工用户照 `docs/runbooks/closeout.md` 手册走同一 start→closeout 流程,门禁是唯一的机械强制点。
->
 > **路径说明**:`.worklog/templates/` 与 `docs/runbooks/closeout.md` 均由 `worklog init` stamp 进**本仓**。不要去引 worklog-kit **包内**的 `templates/`——thin-runner 拓扑下引擎驻包、消费仓里没有那个目录,引它等于给出一条走不通的指路(R4-02)。
 
 ## 安全

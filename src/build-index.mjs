@@ -215,6 +215,7 @@ export function writeArtifacts(root, config, files) {
   }
   mkdirSync(outAbs, { recursive: true });
   const tmps = [];
+  const renamed = []; // [dest, before|null]:rename 已生效的目标与其 before-image
   try {
     for (const [name, content] of Object.entries(all)) {
       const dest = join(outAbs, ...name.split('/')); // timeline/*.md 带子目录
@@ -223,8 +224,17 @@ export function writeArtifacts(root, config, files) {
       writeFileSync(tmp, content);
       tmps.push([tmp, dest]);
     }
-    for (const [tmp, dest] of tmps) renameSync(tmp, dest);
+    // rename 阶段带 before-image(复审 D12:多文件事务)——中途失败不能留「半新半旧」
+    // 产物集:已换上的恢复原文(原无则删),没换的 tmp 清掉,盘面回到调用前。
+    for (const [tmp, dest] of tmps) {
+      const before = existsSync(dest) ? readFileSync(dest) : null;
+      renameSync(tmp, dest);
+      renamed.push([dest, before]);
+    }
   } catch (e) {
+    for (const [dest, before] of renamed) {
+      try { before === null ? rmSync(dest, { force: true }) : writeFileSync(dest, before); } catch { /* 回滚尽力;失败面留给 error 报告 */ }
+    }
     for (const [tmp] of tmps) rmSync(tmp, { force: true });
     return { error: e.message };
   }

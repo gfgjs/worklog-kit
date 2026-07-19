@@ -15,11 +15,18 @@ export const COMMAND_ARGS = {
   config: { flags: ['--selftest'] },
   baseline: { flags: ['--update'] },
   upgrade: { flags: ['--selftest', '--dry-run'] },
-  doctor: { flags: [] },
+  doctor: { flags: ['--verbose', '--json'] },
   selftest: { flags: [] },
   // P3 阶段 4:任务名是**任意**字符串(含中文),走 freePositional 档而非枚举白名单
   team: { flags: ['--dry-run'], valueFlags: ['--owner'], freePositional: true },
   closeout: { flags: ['--dry-run'], valueFlags: ['--summary'], freePositional: true },
+  // 产品化机械命令(复审 §8.2)
+  start: { flags: ['--dry-run'], valueFlags: ['--mode'], freePositional: true },
+  list: { flags: ['--active', '--ready', '--json'] },
+  resume: { flags: ['--compact', '--full'], freePositional: true },
+  note: { flags: ['--stdin'], valueFlags: ['--kind'], freePositional: true },
+  checkpoint: { flags: ['--stdin', '--dry-run'], freePositional: true },
+  'next-id': { flags: ['--json'] },
 };
 
 /**
@@ -81,6 +88,13 @@ export function selftest() {
   assert(v('closeout', ['甲任务', '乙任务']).unknown.join() === '乙任务', 'freePositional 仍至多一个(多给即拒)');
   assert(v('team', ['甲任务', '--owner', '小明']).unknown.length === 0, 'team 任务名 + --owner 取值合法');
   assert(v('team', ['--ownr', 'x']).unknown.join() === '--ownr', 'team 手滑 flag 被拒(--ownr;整条命令 exit 2,后随值不再有机会被误用)');
+  // ── 产品化机械命令(复审 §8.2)──
+  assert(v('start', ['甲任务', '--mode', 'lite', '--dry-run']).unknown.length === 0, 'start 中文任务名 + --mode 取值合法');
+  assert(v('note', ['甲任务', '--kind', 'finding', '--stdin']).unknown.length === 0, 'note 三参齐合法');
+  assert(v('note', ['甲任务', '--kind']).missingValue.join() === '--kind', 'note --kind 缺值被拒(R7-09 同契约)');
+  assert(v('checkpoint', ['甲任务', '--stdim']).unknown.join() === '--stdim', 'checkpoint 手滑 flag 被拒');
+  assert(v('next-id', ['--json']).unknown.length === 0 && v('next-id', ['多余']).unknown.join() === '多余', 'next-id 正反例(无 freePositional,裸参数拒)');
+  assert(v('resume', ['甲任务', '--full']).unknown.length === 0 && v('list', ['--ready', '--json']).unknown.length === 0, 'resume/list 合法组合全过');
   // ── R7-09 拆分修:flag 出现但缺值 ⇒ 拒;flag 未出现 ⇒ 不关此层(命令自走默认)──
   assert(v('skills', ['--target']).missingValue.join() === '--target', 'R7-09:尾置取值 flag 缺值被拒(曾静默装到默认位置)');
   assert(v('skills', ['--target', '--check']).missingValue.join() === '--target', 'R7-09:取值 flag 后随另一 flag 也算缺值');

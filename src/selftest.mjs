@@ -13,6 +13,7 @@ import { selftest as doctorSelftest } from './doctor.mjs';
 import { selftest as upgradeSelftest } from './upgrade.mjs';
 import { selftest as gateSelftest } from './lib/gate.selftest.mjs';
 import { selftest as buildSelftest } from './build-index.mjs';
+import { selftest as tasksSelftest } from './tasks.mjs';
 import { selftest as e2eSelftest } from './e2e.mjs';
 
 const SUITES = [
@@ -28,6 +29,7 @@ const SUITES = [
   ['build-index', buildSelftest],
   ['install-skills', skillsSelftest],
   ['doctor(main 主流程+EOL 体检+行数护栏)', doctorSelftest],
+  ['tasks(产品命令 start/list/resume/note/checkpoint/next-id)', tasksSelftest],
   // e2e 排最后但**不是可选的**:本仓 == 包,消费者才会撞的断裂在单元测里结构性
   // 不可见(dogfood 遮蔽)。它是唯一能看见消费路径的一套。
   ['e2e', e2eSelftest],

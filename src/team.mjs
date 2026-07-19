@@ -31,6 +31,9 @@ export function main({ root, config, t, args }) {
   }
   const nameArg = positionals[0];
   if (!nameArg) { console.error(t('team.cmdUsage')); return 2; }
+  // C8(复审 P1-04):team 是 experimental/opt-in——skill 接续路径与 doctor 体积护栏
+  // 都尚未理解 events 流,且无真实 team 使用证据;停止扩功能,入口明示预期
+  console.log(t('team.experimental'));
   const r = resolveTaskDir(root, config, nameArg);
   if (!r.ok) {
     console.error(t(r.reason === 'ambiguous' ? 'task.ambiguous' : 'task.notFound',

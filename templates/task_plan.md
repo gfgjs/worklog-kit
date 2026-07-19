@@ -14,6 +14,8 @@ created: <YYYY-MM-DD>
 <阶段 N:名称>
 
 ## 阶段
+<!-- 阶段翻 complete 时当场折叠:checklist 压成一行(阶段名 + commit + 一句话结论),
+     细节证据在 git/progress,留这里即三处重复 -->
 
 ### 阶段 1:<名称>
 - [ ] <要点>

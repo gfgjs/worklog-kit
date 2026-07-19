@@ -11,7 +11,7 @@
 - **永久层**:团队文档(设计/决策/审查/手册)靠自觉维护,移动不修链、归档不留横幅、经验不沉淀——无人机械兜底。
 - **蒸馏缝**:易失层里的耐久价值(踩过的坑、拍的板)在任务收口时**逐候选提升**进永久层,由 CI 静态门校验不漏不错。
 
-市面工具多只做其一(纯 AI memory 框架无 CI 纪律;纯 docs linter 无 agent 喂料)。worklog-kit 把两层咬合 + 静态门做成一个可 `init` 的开发者工具。
+同类工具常各占一端(AI memory 框架偏易失记忆、docs linter 偏永久层校验、spec/task 工具偏生命周期)。worklog-kit 的差异不在功能数量,而在把**易失层 → 逐候选蒸馏 → 永久层**串成一条由 deterministic 静态门把守、provider-neutral 纯 Markdown、可 `init` 的缝。token 成本须版本分桶 A/B 实测后再给结论,本页不作省税宣称。
 
 ## 先读这 20 秒:包名 ≠ 命令名
 
@@ -163,14 +163,20 @@ npx worklog-kit check               # 存量豁免、新增违规照红
 | `init [--skill-only] [--profile <档>]` | stamp 全套(或仅 skill);自动判 strict/brownfield |
 | `check` | docs 门禁(上表) |
 | `index` | 索引门;`index build` / `index check` 显式子命令,裸 `index` 按档执行 |
-| `closeout <任务> [--summary <一句话>] [--dry-run]` | 收口机械步:三件套 status 翻转 + 迁 worklogs + 登记 + 双门 |
+| `start <任务> [--mode trio\|lite]` | 开工建档:三件套(默认)或单文件 checkpoint(lite);消毒/日期前缀/撞名递增全代劳 |
+| `list [--active\|--ready] [--json]` | 在施任务清单;`--ready` 列全阶段完成者(只提示,收口仍须用户明示) |
+| `resume <任务> [--full]` | 输出接续热视图:task_plan+findings 全文 + progress 前情+最近 2 段 |
+| `note <任务> --kind finding\|decision\|progress --stdin` | 追加记录到正确的节:原子写、EOL 保形;内容当数据,不进 shell 解析(heredoc 的替代) |
+| `checkpoint <任务> [--stdin] [--dry-run]` | 热区压缩:旧会话段**原文迁** `progress-archive.md`(先归档后裁剪,不丢账);`--stdin` 换前情段 |
+| `next-id [--json]` | 下一个可用 `F-NNN`/`D-NNN`(免为找号扫全仓) |
+| `closeout <任务> [--summary <一句话>] [--dry-run]` | 收口机械步:三件套 status 翻转 + 迁 worklogs + 登记 + 双门(门红自动回滚原状) |
 | `baseline --update` | brownfield 存量债立账 |
 | `upgrade [--dry-run]` | 配置 schema 逐级迁移(v1→…→v5),注释保全 |
 | `skills [--check\|--force]` | `/planning` skill 装到本机 agent home(Codex)/ 验一致性 |
-| `doctor` | 本机诊断:配置合法性 + skill 一致性 + 模板副本漂移 + stale trio + 三件套行数护栏 + 仓库 EOL 体检 |
+| `doctor` | 本机诊断:配置合法性 + skill 一致性 + 模板副本漂移 + stale trio + 三件套体积护栏(行数 + est-token 单件/合计 + 完成阶段可折叠 + ready-to-close 提示;默认摘要 top 5,`--verbose` 展开、`--json` 机读)+ 仓库 EOL 体检 |
 | `config` | 打印配置实际加载结果(「我的配置到底被读成什么」) |
-| `team <任务>` | solo→team 一次性迁移(progress 改 events/ 承载) |
-| `selftest` | 全量自检 13 套 |
+| `team <任务>` | solo→team 一次性迁移(progress 改 events/ 承载)。**experimental/opt-in**:resume/checkpoint/doctor 护栏暂不理解事件流,无真实多人使用反馈前功能冻结 |
+| `selftest` | 全量自检 14 套 |
 
 ## closeout 收口契约(蒸馏缝的机械强制点)
 

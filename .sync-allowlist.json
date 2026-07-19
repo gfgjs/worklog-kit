@@ -1,0 +1,21 @@
+{
+  "_note": "公开面 allowlist(默认拒发):不在此清单的路径不会同步到公仓。dir/=整树,file=单文件。加行须 review——这是公开面的唯一声明点。",
+  "allow": [
+    ".gitattributes",
+    ".github/",
+    ".gitignore",
+    ".sync-allowlist.json",
+    ".worklogrc.jsonc",
+    "LICENSE",
+    "README.md",
+    "bin/",
+    "docs/",
+    "locales/",
+    "package.json",
+    "schema/",
+    "skills/",
+    "src/",
+    "templates/",
+    "tools/"
+  ]
+}

@@ -330,6 +330,16 @@ export function selftest() {
       'closeout --dry-run 零迁移');
     writeFileSync(join(pl, 'closeout.md'), coBody.replace('owner: 小明', 'owner: mallory'));
     assert(quiet(() => closeoutCmd({ root, config: loadConfig(root).config, t, args: ['协作任务'] })).code === 2, '非 owner 收口起跑线即拒(E6 前置)');
+    // 事务回滚(复审 §P1-06/R7-08):closeout.md 过 preflight(owner 对)但双门红(verified=no)
+    // ⇒ 先 mutate 后验、门红回滚——用户拿到收口前的干净工作树,不是半完成状态
+    writeFileSync(join(pl, 'closeout.md'), coBody.replace('| yes |', '| no |'));
+    const tpStatusBefore = parseFrontmatter(readFileSync(join(pl, 'task_plan.md'), 'utf8')).data.status;
+    const readmeSnap = readFileSync(wlP, 'utf8');
+    const rb = quiet(() => closeoutCmd({ root, config: loadConfig(root).config, t, args: ['协作任务'] }));
+    assert(rb.code === 1 && existsSync(pl), 'closeout 双门红 ⇒ exit 1 且任务未迁走(事务回滚)');
+    assert(parseFrontmatter(readFileSync(join(pl, 'task_plan.md'), 'utf8')).data.status === tpStatusBefore, '回滚:task_plan status 复原(未留 snapshot 半态)');
+    assert(readFileSync(wlP, 'utf8') === readmeSnap, '回滚:worklogs README 复原(无残留登记行)');
+    assert(rb.out.includes('已回滚'), '回滚:输出明示回滚,不让用户误以为收口成功');
     writeFileSync(join(pl, 'closeout.md'), coBody);
     assert(quiet(() => closeoutCmd({ root, config: loadConfig(root).config, t, args: ['协作任务', '--summary', 'e2e 收口演练'] })).code === 0,
       'worklog closeout exit 0(机械步落盘 + 双门绿)');

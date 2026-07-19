@@ -27,28 +27,46 @@ created: 2026-07-18
    2FA 账号 publish 时还要一次性口令(`--otp=<6位>` 或浏览器授权),此步天然人工,不可自动化。
 3. 版本号已裁定(prerelease 递增 `0.1.0-alpha.N`;正式版语义另裁)。
 
-## 标准流程(顺序即防线,不可调换)
+## 标准流程(顺序即防线,不可调换;复审 §9 链序——一条链上 pack 恰一次,tgz 即发布物)
+
+> 链的核心改变(alpha.2 三方分裂的教训,见
+> `docs/reviews/2026-07-19-alpha2发布链差异留档.md`):**publish 的必须是从公仓 exact
+> commit pack 出的那颗 tgz 本身**,tag 打的必须是那个 exact commit——三方(registry/
+> tag/源)由同一颗 tgz 与同一个 commit 钉死,不再各自装配。
 
 1. **私仓 bump 版本**:`package.json` 的 `version` 改新值,单独 commit
    (`chore(version): <新版本>——<一句发布理由>`)。版本号只在私仓改——公开仓永远只收
-   `sync:` 快照,禁止公仓先发、私仓回灌的倒挂路(alpha.1 走过一次,不再)。
+   `sync:` 快照,禁止公仓先发、私仓回灌的倒挂路(alpha.1 走过一次,不再)。版本只前进,
+   **绝不复用已发布号**。
 2. **私仓门绿**:`npm run selftest` + `npm run check` + `npm run index` 全 exit 0。
 3. **私仓 push**(须用户批准)。
-4. **净化同步**:`node tools/sync-public.mjs --apply --selftest`——终检零命中 + 导出树
-   双门 + 全量 selftest 绿才落公仓 commit;公仓 push(或 `--apply --push` 一步)。
-5. **公仓干净树发布**:
+4. **净化同步**:`node tools/sync-public.mjs --apply --selftest`——allowlist 默认拒发 +
+   终检三面(导出树 / exact tgz / 公史全 refs)零命中 + 导出树双门 + 全量 selftest 绿,
+   才 ff 公仓;公仓 push(或 `--apply --push` 一步)。
+5. **公仓 exact commit 出唯一 tgz + 真包 e2e**:
    ```bash
    cd ../worklog-kit-public
-   npm publish --dry-run        # 先看 tarball 清单:只该有 bin/src/locales/schema/skills/templates + 包务件
-   npm publish --tag latest     # prerelease 强制显式 --tag(实测 alpha.2);2FA 账号须 --otp=<6位> 或浏览器授权
-   npm dist-tag add worklog-kit@<版本> alpha   # 双针
+   git rev-parse HEAD                       # 记下 exact commit,tag 就打它
+   npm pack                                 # 唯一发布物 worklog-kit-<版本>.tgz
+   node ../worklog-kit/tools/release-selftest.mjs .   # pack→install→spawn 真消费链(--full 加全量)
    ```
-6. **公仓打 tag**(承 alpha.1 惯例):`git tag v<版本> && git push origin v<版本>`。
-7. **验证**:
+6. **publish 这颗 tgz 本身**(不裸 `npm publish` 重复装配):
    ```bash
-   npm view worklog-kit dist-tags versions
-   npx --yes --package worklog-kit@<版本> worklog selftest   # registry 冒烟:装得上、跑得绿。须在仓外目录跑(见「实测坑」自遮蔽)
+   npm publish ./worklog-kit-<版本>.tgz --tag latest   # prerelease 强制显式 --tag;2FA 须 --otp 或浏览器授权
+   npm dist-tag add worklog-kit@<版本> alpha            # 双针
    ```
+   (provenance 需在受支持 CI 内 `--provenance` 发布,本地发不出;转 CI 发布流后再启,
+   见 npm 官方 provenance 文档——诚实声明,不假装本地链有 attestation。)
+7. **校 registry 指纹**:`npm view worklog-kit@<版本> dist.shasum` 必须与本地那颗 tgz 的
+   SHA1(`Get-FileHash -Algorithm SHA1` / `sha1sum`)逐位相等——线上物即验净物。
+8. **tag exact commit 并复验**:
+   ```bash
+   git tag v<版本> <第5步记下的 commit> && git push origin v<版本>
+   git -c advice.detachedHead=false checkout v<版本> && npm pack --dry-run   # shasum 复对 registry
+   git checkout main
+   ```
+9. **registry 冒烟**:`npx --yes --package worklog-kit@<版本> worklog selftest`
+   (须在仓外目录跑,见「实测坑」自遮蔽)。
 
 ## 发布后
 
