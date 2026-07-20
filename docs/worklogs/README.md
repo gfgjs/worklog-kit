@@ -9,7 +9,7 @@ created: 2026-07-13
 # worklogs — 长任务工作记忆归档
 
 存放本仓**已收口长任务**的三件套(`task_plan`/`findings`/`progress`)+ `closeout.md`。
-收口契约由 `worklog check` 机械校验:声明候选全覆盖不重不漏、disposition 枚举、target 验存或冻结引用、verified=yes。
+收口契约由 `worklog-kit check` 机械校验:声明候选全覆盖不重不漏、disposition 枚举、target 验存或冻结引用、verified=yes。
 
 ## 已归档任务
 

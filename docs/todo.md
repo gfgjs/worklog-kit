@@ -9,7 +9,7 @@ created: 2026-07-16
 # 滚动状态(todo)
 
 > 📦 滚动状态已分片(generated 档,2026-07-16):各工作线现役状态见 `docs/status/`
-> (每线恰好一文件,D-016;聚合只读视图由 `worklog index build` 产出,不入库 C-3)。
+> (每线恰好一文件,D-016;聚合只读视图由 `worklog-kit index build` 产出,不入库 C-3)。
 > 本文件退役:原「工作线」表与「待办」两节已人工归并进对应分片
 > (`docs/status/worklog-kit-oss.md`、`docs/status/文档治理.md`、`docs/status/建仓与v0.3基线.md`);
 > `P2生成式索引与契约收敛` 的滚动状态即其在施三件套(`docs/planning/` 下 progress.md),不另设分片。

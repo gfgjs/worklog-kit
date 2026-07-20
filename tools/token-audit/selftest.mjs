@@ -49,8 +49,9 @@ export function selftest() {
   assert(cli('worklog check') === 'check', 'CLI:worklog check');
   assert(cli('node ./bin/worklog.mjs doctor') === 'doctor', 'CLI:worklog.mjs doctor(复审 §3.5(7) 修)');
   assert(cli('npx worklog-kit@0.1.0-alpha.2 index') === 'index', 'CLI:npx worklog-kit@ver index');
-  assert(cli('{"command":["bash","-lc","worklog closeout mytask"]}') === 'closeout', 'CLI:Codex 序列化 arguments');
-  assert(cli('worklog note 甲任务 --kind finding --stdin') === 'note', 'CLI:产品命令 note 已收编');
+  assert(cli('worklog-kit doctor') === 'doctor', 'CLI:裸新 bin 名 worklog-kit doctor(bin 更名后双形之新形)');
+  assert(cli('{"command":["bash","-lc","worklog closeout mytask"]}') === 'closeout', 'CLI:Codex 序列化 arguments(旧形存量转录仍须识别)');
+  assert(cli('worklog note 甲任务 --kind finding --stdin') === 'note', 'CLI:产品命令 note 已收编(旧形)');
   assert(cli('echo worklogging along') === null, 'CLI:worklog 词中不误命中');
 
   const win = makeWindow('2026-07-01', '2026-07-19');

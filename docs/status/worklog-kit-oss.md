@@ -8,7 +8,7 @@ created: 2026-07-16
 
 # worklog-kit-oss · 滚动状态
 
-- 现况(2026-07-18):**P1–P5 全收口**。npm 已发布 `worklog-kit@0.1.0-alpha.2`(`latest`/`alpha` 双针均指之;registry 冒烟:裸 install + 13 套 selftest 绿;公仓 git tag `v0.1.0-alpha.2`);公开仓已建并推平(fresh-export 断档基线,其后净化快照同步)。双源模型已裁并落地:本仓为唯一开发源,公开仓为净化镜像——同步走 `tools/sync-public.mjs`,流程契约见 `docs/runbooks/sync-public.md`;发布流程见 `docs/runbooks/npm-release.md`。selftest **13 套**;配置 schemaVersion **v5**(generated 档)。第六轮全仓深度 Review 行动序已清(引擎 P1/P2 + §5 nit + 三决策);P5 收口台账见 `docs/worklogs/2026-07-18-P5转公开起手-fresh-export断档与scrollery收编/`。
+- 现况(2026-07-19):npm 已发布 `worklog-kit@0.1.0-alpha.3`(`latest`/`alpha` 双针均指之;链序改「公仓 exact commit 唯一 pack → release-selftest 真包 e2e → publish 该 tgz 本身 → 校 registry shasum → tag exact commit 复验」,九步全过;registry 冒烟绿);公开仓已建并推平,双源模型已裁并落地:本仓为唯一开发源,公开仓为净化镜像——同步走 `tools/sync-public.mjs`(allowlist 默认拒发 + disposable clone + 三面终检 + `--scan-only` 收口前快扫),流程契约见 `docs/runbooks/sync-public.md`;发布流程见 `docs/runbooks/npm-release.md`。本轮新增产品化机械命令六件(`start/list/resume/note/checkpoint/next-id`)+ token-audit 五模块化;selftest **14 套**;配置 schemaVersion **v5**(generated 档)。alpha.2 三方发布链差异已留档定案(`docs/reviews/2026-07-19-alpha2发布链差异留档.md`:registry alpha.2 源头 = 私仓 `12c3383`,公仓 tag 是发布后快照,不动已公开 tag)。第六轮全仓深度 Review 行动序已清(引擎 P1/P2 + §5 nit + 三决策);P5 收口台账见 `docs/worklogs/2026-07-18-P5转公开起手-fresh-export断档与scrollery收编/`;07-19 复审施工台账见 `docs/worklogs/2026-07-19-token税二轮-写侧纪律与护栏改口径/` 等本轮九笔(`999734a..570abcb`)。
 
 ## 待办(2026-07-16 自 todo.md 迁入)
 

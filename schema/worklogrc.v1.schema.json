@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/gfgjs/worklog-kit/schema/worklogrc.v1.schema.json",
   "title": "worklog-kit 项目配置 v1(.worklogrc.jsonc)",
-  "description": "⚠️ v1 已冻结,新仓请用 v2(worklogrc.v2.schema.json)。本文件只为读懂存量 v1 配置而保留——`worklog upgrade` 据它判定迁移起点。v1 与 v2 的差别:v1 的 types 是字符串数组(无 canBeAuthoritative 槽位),targetKind 无 line-status。机器面契约锁 ASCII;展示面由 locales/<lang>.json 本地化。参见设计方案 §5(R3-1)、§7.4(R2-C5/D-003)。",
+  "description": "⚠️ v1 已冻结,新仓请用 v2(worklogrc.v2.schema.json)。本文件只为读懂存量 v1 配置而保留——`worklog-kit upgrade` 据它判定迁移起点。v1 与 v2 的差别:v1 的 types 是字符串数组(无 canBeAuthoritative 槽位),targetKind 无 line-status。机器面契约锁 ASCII;展示面由 locales/<lang>.json 本地化。参见设计方案 §5(R3-1)、§7.4(R2-C5/D-003)。",
   "type": "object",
   "required": ["schemaVersion", "docsDir", "dirs", "status", "types", "dispositions"],
   "additionalProperties": false,

@@ -110,7 +110,7 @@ export function selftest() {
       assert(!linkRule && r2.code === 1, '在已立账文件里新增**未立账规则**的违规 ⇒ enforce');
 
       // D-013 的结构保证,直证一次:baseline **立不了 idMissing 的账**。
-      // 它不是「装工具前就有、且工具修不了」的存量债——`worklog upgrade` 一个命令就能真修好;
+      // 它不是「装工具前就有、且工具修不了」的存量债——`worklog-kit upgrade` 一个命令就能真修好;
       // 给它开豁免等于用「记账挂起」替掉一条真能走通的路,那笔账会一直挂在那里。
       write('docs/noid.md', '---\nstatus: active\ntype: design\nline: x\ncreated: 2020-01-01\n---\n\n# 没有号的文档\n');
       assert(quiet(() => baselineCmd({ root, config: bf, t, args: ['--update'] })).code === 0, '含 idMissing 时 baseline --update 仍 exit 0(它只是立不了这条的账)');

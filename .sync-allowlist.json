@@ -6,6 +6,7 @@
     ".gitignore",
     ".sync-allowlist.json",
     ".worklogrc.jsonc",
+    "CLAUDE.md",
     "LICENSE",
     "README.md",
     "bin/",

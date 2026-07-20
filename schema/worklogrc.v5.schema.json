@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/gfgjs/worklog-kit/schema/worklogrc.v5.schema.json",
   "title": "worklog-kit 项目配置 v5(.worklogrc.jsonc)",
-  "description": "当前版本。机器面契约锁 ASCII(字段名/枚举名/元模型槽位);展示面(报错/索引标签)由 locales/<lang>.json 本地化。元模型收敛、实例可配(D-003)。v4→v5 变更:`index` 对象新增 `mode`(索引形态档:invariant=手工索引 + 不变量门,MVP 默认;generated=`index build` 生成式索引,产物不入库 C-3)与 `outDir`(生成物专用目录,建议仓根 .worklog/generated,不得位于 docsDir 内)。缺省 mode=invariant,存量仓行为不变。档间切换是数据布局迁移不是配置开关(R3-3):改 mode 为 generated 后跑 `worklog upgrade` 完成 todo→status 分片迁入。参见设计方案 §4.1 item3/item4、§7.2。",
+  "description": "当前版本。机器面契约锁 ASCII(字段名/枚举名/元模型槽位);展示面(报错/索引标签)由 locales/<lang>.json 本地化。元模型收敛、实例可配(D-003)。v4→v5 变更:`index` 对象新增 `mode`(索引形态档:invariant=手工索引 + 不变量门,MVP 默认;generated=`index build` 生成式索引,产物不入库 C-3)与 `outDir`(生成物专用目录,建议仓根 .worklog/generated,不得位于 docsDir 内)。缺省 mode=invariant,存量仓行为不变。档间切换是数据布局迁移不是配置开关(R3-3):改 mode 为 generated 后跑 `worklog-kit upgrade` 完成 todo→status 分片迁入。参见设计方案 §4.1 item3/item4、§7.2。",
   "type": "object",
   "required": ["schemaVersion", "docsDir", "dirs", "status", "types", "dispositions"],
   "additionalProperties": false,
@@ -110,7 +110,7 @@
         "archivedHeading": { "type": "string" },
         "mode": {
           "enum": ["invariant", "generated"],
-          "description": "索引形态档(§4.1 M-4;D-009):invariant=手工索引 + 不变量门(MVP 默认);generated=`index build` 从 frontmatter 生成 INDEX/STATUS(产物不入库,C-3)。裸 `worklog index` 按此档别名并打印所指。档间切换须跑 `worklog upgrade`(数据布局迁移,R3-3)。",
+          "description": "索引形态档(§4.1 M-4;D-009):invariant=手工索引 + 不变量门(MVP 默认);generated=`index build` 从 frontmatter 生成 INDEX/STATUS(产物不入库,C-3)。裸 `worklog-kit index` 按此档别名并打印所指。档间切换须跑 `worklog-kit upgrade`(数据布局迁移,R3-3)。",
           "default": "invariant"
         },
         "outDir": {

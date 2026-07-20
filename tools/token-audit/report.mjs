@@ -52,7 +52,7 @@ export function renderText(agg, ctx) {
   if (CLIN) {
     L.push('', '── CLI 子命令 ──');
     for (const [sub, c] of Object.entries(agg.cli).sort((a, b) => b[1].t - a[1].t))
-      row(`worklog ${sub}`, c.t, `${c.n} 次`);
+      row(`worklog-kit ${sub}`, c.t, `${c.n} 次`);
   }
 
   const hashes = Object.entries(agg.skillHashes).sort((a, b) => b[1] - a[1]);

@@ -151,7 +151,7 @@ function migrateV4toV5({ raw, text }) {
 /**
  * 数据布局对账之一(v3 起):为缺 `id` 的受检文档播种。**幂等**——已有 id 的一律不碰。
  *
- * 为什么它不写在 migrateV2toV3 里面(施工时实测踩出来的洞):存量仓跑 `worklog init`
+ * 为什么它不写在 migrateV2toV3 里面(施工时实测踩出来的洞):存量仓跑 `worklog-kit init`
  * 会直接 stamp 出**最新版**配置 + 一堆没有 id 的既存文档。此时它的 schemaVersion 已经是
  * 最新,`upgrade` 若只做「推进版本号」就会答「已是最新版」直接退出——**播种代码永远不会
  * 执行,那些文档永远拿不到梯子**,正是 F-001 的原罪「只上门不给梯子」。
@@ -228,7 +228,7 @@ created: ${created}
 
 # ${slug}
 
-(占位实体,由 \`worklog upgrade\` 从存量 \`line\` 值播种。请复核并补一句话使命,可选 owner。)
+(占位实体,由 \`worklog-kit upgrade\` 从存量 \`line\` 值播种。请复核并补一句话使命,可选 owner。)
 ${extras.length ? `\n${extras.join('\n')}\n` : ''}`;
 
 /**
@@ -378,7 +378,7 @@ function retireLetterRegistry(readmeRaw, registry, today) {
   const { start, end } = registry.section;
   const eol = lines[start].endsWith('\r\n') ? '\r\n' : '\n';
   const banner = `${eol}> 📦 本表已退役(${today}):v4 起工作线 = \`lines/<slug>.md\` 实体,开线即建文件,无须取号。` +
-    `历史行已由 \`worklog upgrade\` 归并进对应线实体;失配项(死号/野号/表外线)见当次 upgrade 输出。${eol}${eol}`;
+    `历史行已由 \`worklog-kit upgrade\` 归并进对应线实体;失配项(死号/野号/表外线)见当次 upgrade 输出。${eol}${eol}`;
   return [...lines.slice(0, start + 1), banner, ...lines.slice(end)].join('');
 }
 
@@ -497,7 +497,7 @@ created: ${created}
 
 # ${slug} · 滚动状态
 
-${migrated ? `${migrated.trimEnd()}\n` : '(分片由 `worklog upgrade` 生成;收口时 disposition=todo 的候选落此,请随施工滚动更新。)\n'}`;
+${migrated ? `${migrated.trimEnd()}\n` : '(分片由 `worklog-kit upgrade` 生成;收口时 disposition=todo 的候选落此,请随施工滚动更新。)\n'}`;
 
 /**
  * generated 档对账(阶段 4 下半):todo 单文件 → `status/<slug>.md` 分片的一次性迁入,
@@ -717,7 +717,7 @@ function verifyGenerated(root) {
     const m = lineEntityRe.exec(g.rel);
     if (!m || g.data.status === 'archived' || g.data.status === 'superseded') continue;
     const shard = join(root, ...`${statusDir}/${m[1]}.md`.split('/'));
-    if (!existsSync(shard)) errors.push(`线「${m[1]}」缺滚动状态分片(${statusDir}/${m[1]}.md);出路:手建该分片(type: rolling-status、line 指自身文件名)后重跑 worklog upgrade`);
+    if (!existsSync(shard)) errors.push(`线「${m[1]}」缺滚动状态分片(${statusDir}/${m[1]}.md);出路:手建该分片(type: rolling-status、line 指自身文件名)后重跑 worklog-kit upgrade`);
   }
   return errors;
 }

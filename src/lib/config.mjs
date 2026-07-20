@@ -13,7 +13,7 @@ export const CONFIG_NAME = '.worklogrc.jsonc';
 /**
  * 本工具版本支持的配置布局版本,升序。**旧版本仍可读**(按其版本的 schema 校验、
  * 载入时归一为最新内部形态),这是 R5-C3 的要求:不得只上门不给梯子——存量仓看见
- * 新门的同时必须能跑 `worklog upgrade`。不在此列的版本(未来版本)一律拒绝:
+ * 新门的同时必须能跑 `worklog-kit upgrade`。不在此列的版本(未来版本)一律拒绝:
  * 用旧引擎解释新布局,得到的是基于错误 schema 的判定。
  */
 export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, 4, 5];
@@ -90,7 +90,7 @@ export const DEFAULTS = {
   archiveBannerMarkers: ['已归档', '已废弃', '已执行', '被推翻', '已过时', 'archived', 'superseded', 'deprecated'],
 };
 
-/** 索引形态档(D-009 裸 `worklog index` 按此别名)。config.index 是**浅合并**——用户只声明
+/** 索引形态档(D-009 裸 `worklog-kit index` 按此别名)。config.index 是**浅合并**——用户只声明
  *  headings 时 DEFAULTS.index 整体被替换,故缺省值在此兜底,不在合并层。 */
 export const indexMode = (config) => config.index?.mode || 'invariant';
 
@@ -189,7 +189,7 @@ function validateSemantics(cfg) {
   // 「这个整数本工具认不认」是版本契约,须在此判——否则未来版本的配置会被当合法
   // 输入喂给旧引擎,得到一个基于错误 schema 的判定。
   if (Number.isInteger(cfg.schemaVersion) && !SUPPORTED_SCHEMA_VERSIONS.includes(cfg.schemaVersion)) {
-    errors.push(`schemaVersion ${cfg.schemaVersion} 不受本工具版本支持(支持:${SUPPORTED_SCHEMA_VERSIONS.join('/')});请升级 worklog-kit,或用旧版跑 worklog upgrade`);
+    errors.push(`schemaVersion ${cfg.schemaVersion} 不受本工具版本支持(支持:${SUPPORTED_SCHEMA_VERSIONS.join('/')});请升级 worklog-kit,或用旧版跑 worklog-kit upgrade`);
   }
   if (typeof cfg.docsDir === 'string' && !isSafeRelPath(cfg.docsDir)) {
     errors.push(`docsDir 须为仓内相对路径(收到:${cfg.docsDir})`);

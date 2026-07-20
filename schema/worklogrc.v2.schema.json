@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/gfgjs/worklog-kit/schema/worklogrc.v2.schema.json",
   "title": "worklog-kit 项目配置 v2(.worklogrc.jsonc)",
-  "description": "历史版本(现行为 v4,跑 worklog upgrade 迁移)。机器面契约锁 ASCII(字段名/枚举名/元模型槽位);展示面(报错/索引标签)由 locales/<lang>.json 本地化。元模型收敛、实例可配(D-003):字段集与 targetKind 语义由 schemaVersion 编号、变更须附迁移;具体有哪几个 type/disposition 由你的项目自己定,增删不升版。v1→v2 变更:①types 由字符串数组改为对象数组,带 canBeAuthoritative 槽位(§7.2 权威唯一不变量据此判定,不再靠 type 名字猜语义);②targetKind 新增 line-status(D-014)。跑 `worklog upgrade --dry-run` 预览迁移。参见设计方案 §5(R3-1)、§7.4。",
+  "description": "历史版本(现行为 v4,跑 worklog-kit upgrade 迁移)。机器面契约锁 ASCII(字段名/枚举名/元模型槽位);展示面(报错/索引标签)由 locales/<lang>.json 本地化。元模型收敛、实例可配(D-003):字段集与 targetKind 语义由 schemaVersion 编号、变更须附迁移;具体有哪几个 type/disposition 由你的项目自己定,增删不升版。v1→v2 变更:①types 由字符串数组改为对象数组,带 canBeAuthoritative 槽位(§7.2 权威唯一不变量据此判定,不再靠 type 名字猜语义);②targetKind 新增 line-status(D-014)。跑 `worklog-kit upgrade --dry-run` 预览迁移。参见设计方案 §5(R3-1)、§7.4。",
   "type": "object",
   "required": ["schemaVersion", "docsDir", "dirs", "status", "types", "dispositions"],
   "additionalProperties": false,

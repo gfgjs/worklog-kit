@@ -85,7 +85,7 @@ created: ${today()}
 
 # worklogs — 长任务工作记忆归档
 
-存放**已收口长任务**的三件套 + \`closeout.md\`。收口契约由 \`worklog check\` 机械校验。
+存放**已收口长任务**的三件套 + \`closeout.md\`。收口契约由 \`worklog-kit check\` 机械校验。
 
 ## ${indexHeadings(config).archivedHeading}
 
@@ -160,13 +160,13 @@ export const CI_EXTRA_LINE = '      # <PROFILE_EXTRA>';
 
 /**
  * CI 模板按 profile 生成(R2-M4):版本占位符换精确包规格(D-017);profile 写进头注;
- * brownfield 档多一步 `worklog baseline`——报存量豁免现状(报告模式恒 exit 0,不咬 CI;
+ * brownfield 档多一步 `worklog-kit baseline`——报存量豁免现状(报告模式恒 exit 0,不咬 CI;
  * 立账/清账是显式本地动作 `--update`,CI 永不代做)。strict 档无此步(该档无视豁免账)。
  */
 function genCi(config) {
   const spec = `${PKG.name}@${PKG.version}`;
   const extra = config.profile === 'brownfield'
-    ? `      # brownfield 档附加步:报告存量豁免现状(只报不改账;立账/清账走本地 \`worklog baseline --update\`)\n      - run: npx --yes --package ${spec} worklog baseline`
+    ? `      # brownfield 档附加步:报告存量豁免现状(只报不改账;立账/清账走本地 \`worklog-kit baseline --update\`)\n      - run: npx --yes --package ${spec} worklog-kit baseline`
     : '      # strict 档:无 baseline 步(该档无视豁免账,违规全数 enforce)';
   return tpl('ci-github.yml')
     .replaceAll(CI_SPEC_PLACEHOLDER, spec)
@@ -181,7 +181,7 @@ function genCi(config) {
  */
 function genCodeowners(config) {
   const D = config.docsDir;
-  return `# CODEOWNERS(由 \`worklog init\` stamp;方案 §4.3:治理 schema 文件与门禁挂 owner 审)
+  return `# CODEOWNERS(由 \`worklog-kit init\` stamp;方案 §4.3:治理 schema 文件与门禁挂 owner 审)
 # 用法:取消注释并把 @OWNER 换成真实 GitHub 账号/团队;配合仓库设置的
 # required reviews 才有强制力。含未知账号的活行 GitHub 会标错但不阻断。
 #
@@ -308,7 +308,7 @@ function seedIds(root, config, items) {
  * 而一篇既存文档就意味着「这里有本工具没管过的历史」——那正是 brownfield 要处理的东西。
  *
  * 自动选 brownfield 是**安全**的:brownfield 若无 baseline,行为与 strict 完全相同
- *(什么都不豁免)。豁免只会因为有人**显式**跑了 `worklog baseline --update` 才发生。
+ *(什么都不豁免)。豁免只会因为有人**显式**跑了 `worklog-kit baseline --update` 才发生。
  * 所以这个自动判定最坏也就是「档位名字选得不合心意」,不会静默放松任何一条门。
  *
  * @returns {'strict'|'brownfield'}

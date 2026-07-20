@@ -10,7 +10,7 @@ created: 2026-07-13
 
 > 本目录是 worklog-kit 全部工程文档之家,并**吃自己狗粮**——用本工具治理本仓。
 > 机器面契约(frontmatter 字段/枚举值)见 [../.worklogrc.jsonc](../.worklogrc.jsonc)(机器面锁 ASCII);
-> 门禁 `worklog check` / `worklog index` 强制执行。
+> 门禁 `worklog-kit check` / `worklog-kit index` 强制执行。
 
 ## 目录职责
 

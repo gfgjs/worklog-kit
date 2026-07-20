@@ -15,7 +15,7 @@ created: <收口日 YYYY-MM-DD>
 
 <!-- 每个在 findings/task_plan 声明表登记的候选(F-*/D-*),此处恰好一行。
      列序固定:候选 ID | disposition | target | locator | 去重证据 | N/A 理由 | verified
-     由 `worklog check` 机械校验。 -->
+     由 `worklog-kit check` 机械校验。 -->
 
 | 候选 ID | disposition | target | locator | 去重证据 | N/A 理由 | verified |
 |---------|-------------|--------|---------|----------|----------|----------|

@@ -1,4 +1,4 @@
-// 生成式索引:`worklog index build` 扫 source universe 产出 INDEX.md / STATUS.md(§7.2)。
+// 生成式索引:`worklog-kit index build` 扫 source universe 产出 INDEX.md / STATUS.md(§7.2)。
 //
 // 三条纪律,缺一即门面(§4.1 item4 / R5-M7 artifact contract):
 //   1. **产物不入库**(C-3):列入 .gitignore,两分支根本不含派生文件 = 真零合并冲突;
@@ -46,7 +46,7 @@ export { cmpCodePoints };
 const cell = (s) => (s == null || s === '' ? '—' : String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|'));
 
 const header = (name) =>
-  `${GENERATED_MARKER} ${name} — 由 \`worklog index build\` 生成;勿手改;产物不入库(C-3,列入 .gitignore) -->`;
+  `${GENERATED_MARKER} ${name} — 由 \`worklog-kit index build\` 生成;勿手改;产物不入库(C-3,列入 .gitignore) -->`;
 
 /**
  * 任务目录扫描(P3 阶段 4:timeline 聚合与 STATUS「谁在做什么」的输入)。
@@ -150,7 +150,7 @@ export function buildArtifacts(root, config) {
     status.push(
       `## ${slug}`,
       '',
-      L.entity ? `- 线实体:\`${L.entity.rel}\`(${L.entity.data.status ?? '—'})` : '- 线实体:**缺**(有文档引用此线,实体文件不存在——`worklog check` 会红)',
+      L.entity ? `- 线实体:\`${L.entity.rel}\`(${L.entity.data.status ?? '—'})` : '- 线实体:**缺**(有文档引用此线,实体文件不存在——`worklog-kit check` 会红)',
       `- 权威:${auth.length ? auth.join('、') : '—'}`,
       `- 文档:${L.docs.length} 篇${latest ? `;最近 created:${latest}` : ''}`,
       '',
@@ -260,7 +260,7 @@ export function writeArtifacts(root, config, files) {
   return { written: Object.keys(all).map((n) => `${outRel}/${n}`), pruned };
 }
 
-/** `worklog index build` 入口。invariant 档拒绝:改档是数据布局迁移(R3-3),不是顺手预览。 */
+/** `worklog-kit index build` 入口。invariant 档拒绝:改档是数据布局迁移(R3-3),不是顺手预览。 */
 export function main({ root, config, t }) {
   if ((config.index?.mode || 'invariant') !== 'generated') {
     console.error(t('build.invariantMode'));

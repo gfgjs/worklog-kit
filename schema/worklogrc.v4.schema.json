@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/gfgjs/worklog-kit/schema/worklogrc.v4.schema.json",
   "title": "worklog-kit 项目配置 v4(.worklogrc.jsonc)",
-  "description": "历史版本(现行为 v5;本文件冻结,供 v4 配置载入校验与 upgrade 迁移起点)。v3→v4 变更:**本文件的形状一个字节没变**——变的又是**文档数据布局**:`line` 由自由文本收紧为 `lines/<slug>.md` 线实体引用(Q7:开线 = 新建实体文件,撞名 = git add/add 冲突;slug 规则 D-007:剥 (X) 字母尾 + 剔非法字符 + 空格→- + NFC 归一,中文一等公民)。梯子:`worklog upgrade` 从存量 line 值自动播种占位实体、补 README 目录职责表 `lines/` 行;迁移另在实例层补 type `line` 与 dirs `lines`(D-003:实例条目本身不触发升版,随本次迁移顺带补齐)。跑 `worklog upgrade --dry-run` 预览。参见设计方案 §4.1 item2、§7.2。",
+  "description": "历史版本(现行为 v5;本文件冻结,供 v4 配置载入校验与 upgrade 迁移起点)。v3→v4 变更:**本文件的形状一个字节没变**——变的又是**文档数据布局**:`line` 由自由文本收紧为 `lines/<slug>.md` 线实体引用(Q7:开线 = 新建实体文件,撞名 = git add/add 冲突;slug 规则 D-007:剥 (X) 字母尾 + 剔非法字符 + 空格→- + NFC 归一,中文一等公民)。梯子:`worklog-kit upgrade` 从存量 line 值自动播种占位实体、补 README 目录职责表 `lines/` 行;迁移另在实例层补 type `line` 与 dirs `lines`(D-003:实例条目本身不触发升版,随本次迁移顺带补齐)。跑 `worklog-kit upgrade --dry-run` 预览。参见设计方案 §4.1 item2、§7.2。",
   "type": "object",
   "required": ["schemaVersion", "docsDir", "dirs", "status", "types", "dispositions"],
   "additionalProperties": false,

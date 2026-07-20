@@ -65,13 +65,13 @@ created: 2026-07-18
    git -c advice.detachedHead=false checkout v<版本> && npm pack --dry-run   # shasum 复对 registry
    git checkout main
    ```
-9. **registry 冒烟**:`npx --yes --package worklog-kit@<版本> worklog selftest`
+9. **registry 冒烟**:`npx --yes --package worklog-kit@<版本> worklog-kit selftest`
    (须在仓外目录跑,见「实测坑」自遮蔽)。
 
 ## 发布后
 
 - **消费仓升 pin 不自动**(D-017 钉版纪律):各消费仓 CI 钉精确版本,升 pin=升门禁语义。
-  先在消费仓本地干跑新版 `worklog check` / `index` / `baseline` 看红绿变化,绿了再改 CI 钉版行。
+  先在消费仓本地干跑新版 `worklog-kit check` / `index` / `baseline` 看红绿变化,绿了再改 CI 钉版行。
 - 私仓 status 分片(`docs/status/worklog-kit-oss.md`)现况行更新已发版本号。
 
 ## 实测坑(alpha.2 发布撞出)
@@ -84,7 +84,7 @@ created: 2026-07-18
   指纹一致 = 线上物即验净物。
 - **npx 冒烟须在仓外目录跑**(自遮蔽陷阱):在本仓(或公仓克隆)内跑
   `npx --package worklog-kit@<版>` 时,若本地 package.json 恰为同名同版,npm exec 判定
-  spec 已被本地工程满足而**跳过安装**,直接找 PATH 上的 `worklog` 报 not recognized——
+  spec 已被本地工程满足而**跳过安装**,直接找 PATH 上的 `worklog-kit` 报 not recognized——
   假故障。换任意仓外目录即正常;消费仓不受影响(其 package.json 非同名)。
 
 ## 回滚(诚实声明)

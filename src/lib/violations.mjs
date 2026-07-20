@@ -31,14 +31,14 @@ export const keyOf = (v) => `${v.file} ${v.rule}`;
  * 故只能由人补——即它是「装工具之前就有、且工具修不了」的那类存量债。
  *
  * 第②条是阶段 1 补的(方案 §4.1 item1「两把梯子」):梯子有两把,baseline 只是其中一把。
- * 机器能派生的缺口该走**另一把**梯子(`worklog upgrade` 自动补全),给它开豁免等于
+ * 机器能派生的缺口该走**另一把**梯子(`worklog-kit upgrade` 自动补全),给它开豁免等于
  * 用「记账挂起」替换掉一条**一个命令就能真修好**的路——账会一直挂在那里。
  *
  * 刻意**未**收录:
  * - `docs.idMissing` / `docs.idInvalid` —— 违反第②条:`id` 可由 `<created>-<文件名 slug>`
- *   机械派生,`worklog upgrade` 全自动补全。
+ *   机械派生,`worklog-kit upgrade` 全自动补全。
  * - `docs.lineUnresolved` —— 同上违反第②条:实体文件可由 line 值机械播种(slug 自动派生,
- *   D-007),`worklog upgrade` 的对账步骤全自动建。值本身缺失才是人判债(lineMissing,已收录)。
+ *   D-007),`worklog-kit upgrade` 的对账步骤全自动建。值本身缺失才是人判债(lineMissing,已收录)。
  * - `docs.lineEntityType` / `docs.lineEntityMismatch` / `docs.lineFileNotNFC` —— 线实体是
  *   阶段 2 才有的**新**文件,不存在「装工具之前就有」的存量债,不满足收录动机。
  * - `docs.idDuplicate` —— 违反第①条:主语是 **id**,不是文件。撞号的双方各记一条,

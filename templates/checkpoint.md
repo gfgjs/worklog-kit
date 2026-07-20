@@ -8,7 +8,7 @@ created: <YYYY-MM-DD>
 # 检查点:<任务名>
 
 <!-- memory-lite 单文件工作记忆:小型跨会话任务用,整个文件就是热视图,每节保持短。
-     任务膨胀(多阶段/≥5 步)就升 trio:`worklog start <任务> --mode trio` 另建并把本档内容搬过去 -->
+     任务膨胀(多阶段/≥5 步)就升 trio:`worklog-kit start <任务> --mode trio` 另建并把本档内容搬过去 -->
 
 ## 目标
 <一句话说清终态>

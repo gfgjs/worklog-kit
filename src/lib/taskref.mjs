@@ -1,4 +1,4 @@
-// 任务目录解析 + frontmatter 原位编辑(P3 阶段 4:`worklog team` / `worklog closeout` 共用)。
+// 任务目录解析 + frontmatter 原位编辑(P3 阶段 4:`worklog-kit team` / `worklog-kit closeout` 共用)。
 //
 // 编辑函数的纪律与 insertIdLine 同款(docmeta.mjs):BOM 与行尾**原样保留**——
 // 收口/迁移命令的职责不包括顺手重排用户文件的格式,否则真变更淹没在 EOL 噪声里。
@@ -20,7 +20,7 @@ export const stripTaskDate = (dirName) => dirName.replace(TASK_DATE_PREFIX, '');
  */
 export function resolveTaskDir(root, config, name) {
   // R6-12:任务名是**目录名**,不是路径——含分隔符或 `.`/`..` 即拒。不消毒的话
-  // `worklog closeout ..\..\x` 可解析到仓外并 ok:true,下游 renameSync 会真迁移。
+  // `worklog-kit closeout ..\..\x` 可解析到仓外并 ok:true,下游 renameSync 会真迁移。
   if (!name || /[\\/]/.test(name) || name === '.' || name === '..') return { ok: false, reason: 'notFound' };
   const base = join(root, config.docsDir, 'planning');
   if (!existsSync(base)) return { ok: false, reason: 'notFound' };

@@ -1,4 +1,4 @@
-// 产品化机械命令(复审 §8.2):`worklog start/list/resume/note/checkpoint/next-id`。
+// 产品化机械命令(复审 §8.2):`worklog-kit start/list/resume/note/checkpoint/next-id`。
 //
 // 立场(复审 §4.2/§4.3):三件套是 **append-only lossless ledger**——工具只做机械事
 // (建骨架、定位节、原子写、EOL/BOM 保形、有界视图输出),内容判断(前情蒸馏、发现措辞、
@@ -331,7 +331,7 @@ export function mainCheckpoint({ root, config, t, args, stdinText }) {
       archive = [
         '---', 'status: active', 'type: working-memory', `line: ${fmLine}`, `created: ${todayLocal()}`, '---', '',
         `# 进度归档:${fmLine}`, '',
-        '<!-- 旧会话段的冷账(worklog checkpoint 迁入,原文照录);接续只读 progress.md 热区,本档按需查 -->', '',
+        '<!-- 旧会话段的冷账(worklog-kit checkpoint 迁入,原文照录);接续只读 progress.md 热区,本档按需查 -->', '',
       ].join('\n') + '\n';
     }
     const moved = old.map((bi) => lines.slice(blocks[bi].start, endOf(bi)).join('')).join('');

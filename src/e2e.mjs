@@ -100,7 +100,7 @@ export function selftest() {
     assert(!runLines.some((l) => /npm\s+ci\b/.test(l)), 'CI 执行行不跑 npm ci(消费仓未必是 Node 项目)');
     // P3 阶段 5:按 profile 生成(R2-M4)+ merge-queue 要件化(R2-C6)+ CODEOWNERS 脚手架
     assert(ci.includes('本份为 strict 档') && !ci.includes('<PROFILE>'), 'CI 头注写实际 profile(strict,占位符已替换)');
-    assert(!runLines.some((l) => /worklog baseline/.test(l)), 'strict 档 CI 无 baseline 步(该档无视豁免账)');
+    assert(!runLines.some((l) => /worklog-kit baseline/.test(l)), 'strict 档 CI 无 baseline 步(该档无视豁免账)');
     assert(/^\s*merge_group:/m.test(ci), 'CI 对 merge_group 事件注册(merge queue 要件,R2-C6)');
     const coScaffold = readFileSync(join(root, '.github', 'CODEOWNERS'), 'utf8');
     assert(coScaffold.split(/\r?\n/).filter(Boolean).every((l) => l.startsWith('#')), 'CODEOWNERS 脚手架全注释 stamp(不知道账号就不写活行——带假 handle 的活行是谎)');
@@ -246,7 +246,7 @@ export function selftest() {
     // P3 阶段 5:brownfield 档 CI 多一步 baseline 报告(报告模式恒 exit 0,只报不改账)
     const bfCi = readFileSync(join(root, '.github', 'workflows', 'docs-governance.yml'), 'utf8');
     assert(bfCi.includes('本份为 brownfield 档'), 'brownfield 仓的 CI 头注写实际 profile(R2-M4 按档生成)');
-    assert(bfCi.split(/\r?\n/).some((l) => /^\s*-\s*run:.*worklog baseline$/.test(l)), 'brownfield 档 CI 含 baseline 报告步(钉版本)');
+    assert(bfCi.split(/\r?\n/).some((l) => /^\s*-\s*run:.*worklog-kit baseline$/.test(l)), 'brownfield 档 CI 含 baseline 报告步(钉版本)');
   });
   // 已有配置 = 用户真源:init 不改它,只对未收目录告警
   withTemp((root) => {
@@ -273,8 +273,8 @@ export function selftest() {
   });
 
   // ── B6+B7. P3 阶段 4:solo→team 迁移 + closeout 命令全链(设计件 §4/§6)────
-  // 消费仓视角走完:开 solo 任务 → worklog team(迁移引导事件 + 候选 ID 补作者段)→
-  // 门绿 → E3 负例 → 写收口判断件 → worklog closeout(翻转/迁移/登记/双门)→ 双门绿。
+  // 消费仓视角走完:开 solo 任务 → worklog-kit team(迁移引导事件 + 候选 ID 补作者段)→
+  // 门绿 → E3 负例 → 写收口判断件 → worklog-kit closeout(翻转/迁移/登记/双门)→ 双门绿。
   // 任务名与 owner 全中文(D-007 一等公民必须在 e2e 真走)。
   withTemp((root) => {
     quiet(() => init({ root, t, args: [] }));
@@ -290,7 +290,7 @@ export function selftest() {
     const dr = quiet(() => teamCmd({ root, config: loadConfig(root).config, t, args: [TASK, '--owner', '小明', '--dry-run'] }));
     assert(dr.code === 0 && readFileSync(join(pl, 'task_plan.md'), 'utf8') === tpBefore && !existsSync(join(pl, 'progress')), 'team --dry-run 零写入');
     assert(quiet(() => teamCmd({ root, config: loadConfig(root).config, t, args: ['协作任务', '--owner', '小明'] })).code === 0,
-      'worklog team exit 0(剥日期前缀解析任务名 + 中文 owner)');
+      'worklog-kit team exit 0(剥日期前缀解析任务名 + 中文 owner)');
     const tp2 = readFileSync(join(pl, 'task_plan.md'), 'utf8');
     assert(/^mode: team$/m.test(tp2) && /^owner: 小明$/m.test(tp2), 'task_plan 声明 mode: team + owner');
     assert(tp2.includes('D-小明-001') && !/(?<![\w-])D-001(?![\w-])/.test(tp2), '决策表候选 ID 已补作者段(E5 的梯子)');
@@ -342,7 +342,7 @@ export function selftest() {
     assert(rb.out.includes('已回滚'), '回滚:输出明示回滚,不让用户误以为收口成功');
     writeFileSync(join(pl, 'closeout.md'), coBody);
     assert(quiet(() => closeoutCmd({ root, config: loadConfig(root).config, t, args: ['协作任务', '--summary', 'e2e 收口演练'] })).code === 0,
-      'worklog closeout exit 0(机械步落盘 + 双门绿)');
+      'worklog-kit closeout exit 0(机械步落盘 + 双门绿)');
     assert(!existsSync(pl), 'planning 原目录已迁走');
     const arch = readdirSync(join(root, 'docs', 'worklogs')).filter((n) => n.includes('协作任务'));
     assert(arch.length === 1 && /^\d{4}-\d{2}-\d{2}-协作任务$/.test(arch[0]), '归档目录 = 收口日-任务名(开工日前缀已剥换)');

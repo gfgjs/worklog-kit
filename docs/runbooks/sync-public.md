@@ -35,7 +35,7 @@ created: 2026-07-18
    `git archive` 快照(走 `.gitattributes` 钉 LF)才是可信发布面。
 8. **机械门只认已知词**:转公开级别的节点上,人工补一轮 CamelCase 全量扫描 + 领域词表
    扫描,新词回填词表。常态防新增靠这条兜底。
-9. **收口前快扫**:长任务归档进 `docs/worklogs/` 之前(`worklog closeout` 之前,或手写
+9. **收口前快扫**:长任务归档进 `docs/worklogs/` 之前(`worklog-kit closeout` 之前,或手写
    closeout.md 落笔后),对该任务目录跑一次 `node tools/sync-public.mjs --scan-only
    docs/planning/<任务目录>`——归档态文档比在施态更容易被当「反正是内部记录」随手写进
    真实值(2026-07-19 实证:closeout.md 阶段结论写进了一个内部代号词)。零命中再收口,

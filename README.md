@@ -13,13 +13,14 @@
 
 同类工具常各占一端(AI memory 框架偏易失记忆、docs linter 偏永久层校验、spec/task 工具偏生命周期)。worklog-kit 的差异不在功能数量,而在把**易失层 → 逐候选蒸馏 → 永久层**串成一条由 deterministic 静态门把守、provider-neutral 纯 Markdown、可 `init` 的缝。token 成本须版本分桶 A/B 实测后再给结论,本页不作省税宣称。
 
-## 先读这 20 秒:包名 ≠ 命令名
+## 先读这 20 秒:命令名 = 包名
 
 - 运行要求:Node ≥ 20。消费仓**不必**是 Node 项目(`init` 不写 `package.json`)。
-- **包名是 `worklog-kit`,装出来的命令(bin)叫 `worklog`,两者不同。**
-  - 一次性调用一律写包名:`npx worklog-kit <子命令>` ✅
+- **包名与装出来的命令(bin)同名,都叫 `worklog-kit`。**
+  - 一次性调用:`npx worklog-kit <子命令>` ✅
+  - 全局/项目内装过 bin 后:`worklog-kit <子命令>` 同名直接跑 ✅
   - **别跑裸 `npx worklog ...`** ❌:npm 上另有他人的同名包 `worklog`,无本地 bin 时 npx 会按包名把它抓来执行(同名不报错,静默跑别人的)。
-  - CI 里钉到精确版本:`npx --yes --package worklog-kit@<ver> worklog <cmd>`——版本浮动 = 门禁判定浮动。`init` stamp 的 workflow 已按此写好,无需手写。
+  - CI 里钉到精确版本:`npx --yes --package worklog-kit@<ver> worklog-kit <cmd>`——版本浮动 = 门禁判定浮动。`init` stamp 的 workflow 已按此写好,无需手写。
 
 ## 五分钟上手(新仓)
 
@@ -40,7 +41,7 @@ npx worklog-kit init
 ✓ 写入 .worklog/templates/task_plan.md
 ✓ 写入 .github/workflows/docs-governance.yml
 …
-✓ init 完成。下一步:填实 docs/README 与 .worklogrc.jsonc,跑 `worklog check`。
+✓ init 完成。下一步:填实 docs/README 与 .worklogrc.jsonc,跑 `worklog-kit check`。
 ```
 
 stamp 出四类东西:
@@ -189,15 +190,15 @@ npx worklog-kit check               # 存量豁免、新增违规照红
 - 处置表**列名/列数/顺序**固定(按位置解构,列漂移会静默错位取值)。
 - 候选**全覆盖不重不漏**、一候选恰好一行;`verified` 只接受 `yes`,**含 `no-promotion`**(「不提升」也是要有人确认已做完的决定)。
 
-无 AI 用户照收口手册(`worklog init` 会 stamp 到你仓里的 `docs/runbooks/closeout.md`;源见 [templates/runbook-closeout.md](templates/runbook-closeout.md))手动走通同一 start→closeout 流程——门禁是唯一机械强制点,不依赖任何 agent。
+无 AI 用户照收口手册(`worklog-kit init` 会 stamp 到你仓里的 `docs/runbooks/closeout.md`;源见 [templates/runbook-closeout.md](templates/runbook-closeout.md))手动走通同一 start→closeout 流程——门禁是唯一机械强制点,不依赖任何 agent。
 
 ## 配置(`.worklogrc.jsonc`)
 
-机器面(字段名/枚举值/disposition 元模型)锁 **ASCII canonical**;展示面(报错/索引标签)由 `locales/<lang>.json` 本地化。MVP 仅 `zh`。校验 schema:[schema/worklogrc.v5.schema.json](schema/worklogrc.v5.schema.json)(随 `schemaVersion` 版本化,v1–v5 各存一份,`worklog upgrade` 逐级迁移)。
+机器面(字段名/枚举值/disposition 元模型)锁 **ASCII canonical**;展示面(报错/索引标签)由 `locales/<lang>.json` 本地化。MVP 仅 `zh`。校验 schema:[schema/worklogrc.v5.schema.json](schema/worklogrc.v5.schema.json)(随 `schemaVersion` 版本化,v1–v5 各存一份,`worklog-kit upgrade` 逐级迁移)。
 
 ## 设计取舍(v0.3 已裁)
 
-- **索引产物不入库**(gitignore + 按需 `worklog index`)→ 真零合并冲突;无 drift gate。
+- **索引产物不入库**(gitignore + 按需 `worklog-kit index`)→ 真零合并冲突;无 drift gate。
 - **工作线** = `lines/<slug>.md` 实体(P2)而非中心分配字母——撞名成 git add/add 冲突,合并时原生暴露。
 - **采纳梯度** = 显式 profile 两档:`strict` / `brownfield`(D-002),边界见上节;`--warn-only` 是与 profile 正交的全局输出标志。
 - **thin-runner** 拓扑:引擎驻本包,消费仓只落配置 + docs + ci.yml → semver 升级即 `npm update`。
@@ -213,10 +214,10 @@ npx worklog-kit check               # 存量豁免、新增违规照红
 零运行期依赖。跑全部自检:
 
 ```bash
-npm run selftest   # = worklog selftest:config/lib-core/cliargs/jsoncedit/templates/upgrade/gate + 三门 fixture + skills + doctor + e2e,共 13 套
+npm run selftest   # = worklog-kit selftest:config/lib-core/cliargs/jsoncedit/templates/upgrade/gate + 三门 fixture + skills + doctor + e2e,共 13 套
 ```
 
-各门也可定点重跑(`worklog check --selftest` 等)。**e2e 不是可选套件**:本仓就是包
+各门也可定点重跑(`worklog-kit check --selftest` 等)。**e2e 不是可选套件**:本仓就是包
 (package == repo),于是消费者才会撞上的断裂——包内 `templates/` 在这里永远存在、
 配置永远已配好、bin 永远在本地——在单元测里结构性不可见。e2e 在临时目录里造一个
 **非 Node** 消费仓,走完 `init → start → closeout → 双门绿 → 制造违规变红`,是唯一

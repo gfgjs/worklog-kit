@@ -1,6 +1,6 @@
 // worklog-kit 自身的 dogfood 配置(吃自己狗粮:本工具治理本仓 docs/)。
 // 机器面锁 ASCII;本仓现役文档 frontmatter 已随之迁 ASCII 枚举。
-// 2026-07-16 由 `worklog upgrade` 升 v1 → v2 → … → v5(当时迁移重序列化丢注释,系手工补回;
+// 2026-07-16 由 `worklog-kit upgrade` 升 v1 → v2 → … → v5(当时迁移重序列化丢注释,系手工补回;
 // F-005 已清偿 2026-07-17:升档改外科编辑,注释随迁保全,兜底整文重写才告警)。
 {
   "$schema": "./schema/worklogrc.v5.schema.json",
@@ -46,12 +46,12 @@
   // 故不用 "auto"(它会连 src/ templates/ 一并扫进来)。
   // `"."` = 只扫**仓根文件**(R4-11,§7.2 source universe):仓根 README 里指向 docs/ 的
   // 导航链此前 1a(只走 docsDir 之下)与 1b(只收顶层目录)双盲,现由此收编;
-  // src/templates 的自扫描误报不受影响,其 1b 覆盖仍由 `worklog check --selftest` fixture 保证。
+  // src/templates 的自扫描误报不受影响,其 1b 覆盖仍由 `worklog-kit check --selftest` fixture 保证。
   "sourceRoots": ["."],
   "sourceExclude": ["node_modules", "dist", "build", "target", ".git", ".venv", "vendor", "coverage", ".claude", ".github", ".worklog"],
   "profile": "strict",
-  // 索引形态档(§4.1 M-4):本仓 dogfood 生成式档——`worklog index build` 产 INDEX/STATUS
-  // 到 outDir(不入库,C-3);裸 `worklog index` 别名到 index check(D-009)。
+  // 索引形态档(§4.1 M-4):本仓 dogfood 生成式档——`worklog-kit index build` 产 INDEX/STATUS
+  // 到 outDir(不入库,C-3);裸 `worklog-kit index` 别名到 index check(D-009)。
   "index": {
     "dirTableHeading": "目录职责",
     "archivedHeading": "已归档任务",

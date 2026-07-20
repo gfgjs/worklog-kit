@@ -4,7 +4,7 @@
 // 可 review、可 blame,与配置同级。放 .gitignore 或 ~/.cache 里等于让一个人在本地
 // 单方面决定整个仓的门禁松紧。
 //
-// **check 永不自动吸收新违规**:再生成只经显式 `worklog baseline --update`。自动吸收
+// **check 永不自动吸收新违规**:再生成只经显式 `worklog-kit baseline --update`。自动吸收
 // 会让 baseline 一路退化成「自动豁免一切」——门还在,但它同意你做的任何事。
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,7 +36,7 @@ export function buildBaseline(root, config, today) {
       version: BASELINE_VERSION,
       generatedAt: today,
       tool: `${PKG.name}@${PKG.version}`,
-      note: '存量违规豁免清单(brownfield 档)。仅收录可豁免规则;图不变量与索引一致性永不豁免(D-013)。由 `worklog baseline --update` 显式再生成——check 永不自动吸收。',
+      note: '存量违规豁免清单(brownfield 档)。仅收录可豁免规则;图不变量与索引一致性永不豁免(D-013)。由 `worklog-kit baseline --update` 显式再生成——check 永不自动吸收。',
       entries,
     },
     total: all.length,

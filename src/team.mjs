@@ -1,4 +1,4 @@
-// `worklog team <任务>`:solo→team 一次性显式迁移(设计件 §4;D-029)。
+// `worklog-kit team <任务>`:solo→team 一次性显式迁移(设计件 §4;D-029)。
 //
 // 四步机械件,全部可 --dry-run 预览:
 //   1. task_plan frontmatter 写入 `mode: team` + `owner`;
@@ -109,7 +109,7 @@ export function main({ root, config, t, args }) {
     const iso = `${now.toISOString().slice(0, 19)}Z`;
     const body = hasProgress ? renameIn(readFileSync(progressP, 'utf8')) : '';
     writeAtomic(join(dir, ...eventRel.split('/')),
-      `# 迁移引导事件(solo→team)\n\n> ${iso} 由 \`worklog team\` 迁移;${hasProgress ? '以下为原 progress.md 全文。' : '原任务无 progress.md,自此起以事件记进度。'}\n\n${body}`);
+      `# 迁移引导事件(solo→team)\n\n> ${iso} 由 \`worklog-kit team\` 迁移;${hasProgress ? '以下为原 progress.md 全文。' : '原任务无 progress.md,自此起以事件记进度。'}\n\n${body}`);
     if (hasProgress) rmSync(progressP);
   } catch (e) {
     try {

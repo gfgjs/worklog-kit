@@ -5,7 +5,7 @@
 //
 // 用法:node tools/release-selftest.mjs [源目录] [--full]
 //   源目录缺省 = 本仓根;发布流程里传**净化导出树**(runbook §发布)。
-//   --full 额外在装出的包上跑 `worklog selftest` 全量(含 e2e,较慢)。
+//   --full 额外在装出的包上跑 `worklog-kit selftest` 全量(含 e2e,较慢)。
 //
 // 全程在 mkdtemp 临时目录:pack → 空白消费仓 npm install <tgz> → spawn 装出的 bin 走
 // init/start/note(真 stdin)/checkpoint/resume/list/next-id/check/index/doctor 冒烟链。

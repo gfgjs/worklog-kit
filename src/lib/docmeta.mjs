@@ -219,7 +219,7 @@ export function validateDocMeta({ data, config, rep }) {
   // `line`:阶段 1 只要求**存在**;阶段 2 收紧为 `lines/<slug>.md` 实体引用(F-001:门与梯子同批)
   if (!data.line) rep('docs.lineMissing');
 
-  // `id`:阶段 1 新增必填。梯子 = `worklog upgrade`(机器可派生),故**不入 baseline 允许清单**
+  // `id`:阶段 1 新增必填。梯子 = `worklog-kit upgrade`(机器可派生),故**不入 baseline 允许清单**
   const id = data.id;
   if (!id) rep('docs.idMissing');
   else if (!isValidId(id)) rep('docs.idInvalid', { id });

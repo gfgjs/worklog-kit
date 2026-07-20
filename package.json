@@ -1,6 +1,6 @@
 {
   "name": "worklog-kit",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0-alpha.4",
   "description": "工程文档纪律 CI 门禁 + AI working-memory 工作流(两层记忆 + closeout 蒸馏缝)。中文首发 MVP。",
   "type": "module",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "url": "https://github.com/gfgjs/worklog-kit/issues"
   },
   "bin": {
-    "worklog": "bin/worklog.mjs"
+    "worklog-kit": "bin/worklog.mjs"
   },
   "engines": {
     "node": ">=20"

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // worklog-kit CLI 入口。thin-runner:引擎驻本包,消费仓只落配置 + docs + ci.yml。
-// 用法见 `worklog`(无参)或 locales/<lang>.json 的 cli.usage。
+// 用法见 `worklog-kit`(无参)或 locales/<lang>.json 的 cli.usage。
 import { loadConfig } from '../src/lib/config.mjs';
 import { makeTranslator, resolveCli } from '../src/lib/i18n.mjs';
 import { main as checkDocs, selftest as docsSelftest } from '../src/check-docs.mjs';
@@ -24,8 +24,9 @@ const root = process.cwd();
 const isSelftest = args.includes('--selftest');
 
 const { config, errors } = loadConfig(root);
-// resolveCli():经 npx/`npm exec` 启动时,hint 里的 `worklog …` 印成 `npx worklog-kit …`
-// (纯 npx 用户没有持久 bin,裸 `worklog` 会 command-not-found 或撞自遮蔽坑,README §16)。
+// resolveCli():经 npx/`npm exec` 启动时,hint 里的 `worklog-kit …` 印成 `npx worklog-kit …`
+// (纯 npx 用户没有持久 bin,裸 `worklog-kit` 会 command-not-found 或误敲成 `npx worklog`
+// 撞自遮蔽坑,README §16)。
 const t = makeTranslator(config.lang || 'zh', resolveCli());
 
 /** 校验命令(check/index):配置形状错时拒绝门禁(否则可能漏判)。 */
@@ -64,7 +65,7 @@ function dispatch() {
     case 'index': {
       if (isSelftest) return indexSelftest();
       requireGoodConfig();
-      // D-009:`index build` / `index check` 显式子命令;裸 `worklog index` 按档别名并
+      // D-009:`index build` / `index check` 显式子命令;裸 `worklog-kit index` 按档别名并
       // 打印所指——现役脚本/CI 已固化裸 index,别名保兼容,打印防 CLI 层语义分叉。
       const [sub, ...rest] = args;
       if (sub === 'build') return buildIndex({ root, config, t, args: rest });
@@ -113,7 +114,7 @@ function dispatch() {
       requireGoodConfig();
       return mainNextId({ root, config, t, args });
     case 'upgrade':
-      // `--selftest` 必须在真跑之前判。此前漏了这一支:`worklog upgrade --selftest`
+      // `--selftest` 必须在真跑之前判。此前漏了这一支:`worklog-kit upgrade --selftest`
       // 会被当成「带一个无关标志的真迁移」执行——施工时实测踩中,当场把本仓配置升版并
       // 抹掉全部注释(F-005)。其余命令都有这一支,唯独它没有,是**不一致本身**在咬人。
       if (isSelftest) return upgradeSelftest();

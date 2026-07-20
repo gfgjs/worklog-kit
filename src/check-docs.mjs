@@ -290,7 +290,7 @@ export function checkCloseouts(root, config, report) {
     const taskLine = coData.line;
     // E6(设计件 §5):owner 唯一收口的机器可判面——closeout 台账须由 owner 具名。
     // 如实标注边界:CI 看不见谁在跑命令,这里咬的是**声明一致性**;发起人身份的真强制
-    // 在 review 面(CODEOWNERS,阶段 5)与命令面(worklog closeout 的权限提示)。
+    // 在 review 面(CODEOWNERS,阶段 5)与命令面(worklog-kit closeout 的权限提示)。
     if (teamCtx.team) {
       const got = (coData.owner ?? '').trim();
       if (!got || got !== teamCtx.owner) rep('team.closeoutOwner', { owner: teamCtx.owner || '无', got: got || '无' });
