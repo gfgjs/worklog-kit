@@ -8,7 +8,7 @@
 // 会让 baseline 一路退化成「自动豁免一切」——门还在,但它同意你做的任何事。
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { checkDocsAndLinks, checkCloseouts } from './check-docs.mjs';
+import { checkDocsAndLinks, checkCloseouts, checkTeamAndTaskNames } from './check-docs.mjs';
 import { checkIndex } from './check-index.mjs';
 import { toBaselineEntries, loadBaseline, BASELINE_NAME, BASELINE_VERSION } from './lib/gate.mjs';
 import { BASELINE_ELIGIBLE } from './lib/violations.mjs';
@@ -23,6 +23,7 @@ export function collectAll(root, config) {
   const report = (v) => violations.push(v);
   checkDocsAndLinks(root, config, report, false);
   checkCloseouts(root, config, report);
+  checkTeamAndTaskNames(root, config, report);
   checkIndex(root, config, report);
   return violations;
 }

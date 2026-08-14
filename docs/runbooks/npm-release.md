@@ -47,12 +47,13 @@ created: 2026-07-18
    ```bash
    cd ../worklog-kit-public
    git rev-parse HEAD                       # 记下 exact commit,tag 就打它
-   npm pack                                 # 唯一发布物 worklog-kit-<版本>.tgz
-   node ../worklog-kit/tools/release-selftest.mjs .   # pack→install→spawn 真消费链(--full 加全量)
+   rm -f ./worklog-kit-*.tgz                # 清旧 artifact，防手滑选错
+   npm pack --loglevel error                # 本链唯一一次 pack
+   node ../worklog-kit/tools/release-selftest.mjs ./worklog-kit-<版本>.tgz # 直接测这颗，不再 pack（--full 加全量）
    ```
 6. **publish 这颗 tgz 本身**(不裸 `npm publish` 重复装配):
    ```bash
-   npm publish ./worklog-kit-<版本>.tgz --tag latest   # prerelease 强制显式 --tag;2FA 须 --otp 或浏览器授权
+   npm publish ./worklog-kit-<版本>.tgz --tag latest   # 与第5步 e2e 同一 artifact;2FA 须 --otp 或浏览器授权
    npm dist-tag add worklog-kit@<版本> alpha            # 双针
    ```
    (provenance 需在受支持 CI 内 `--provenance` 发布,本地发不出;转 CI 发布流后再启,

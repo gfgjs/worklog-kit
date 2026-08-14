@@ -8,7 +8,7 @@
 // 全程**不 commit**:收口 commit 属用户批准语义,命令只把工作树摆到一眼可 review 的状态。
 // 迁移用 fs rename + 尽力 `git add`(rename 推断在 diff 时按内容判定,不依赖 git mv;
 // 这让命令在非 git 环境/e2e temp 仓也能走通,失败只降级为提醒)。
-import { existsSync, readFileSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseFrontmatter, escapeRe, makeFenceSkipper } from './lib/frontmatter.mjs';
@@ -20,7 +20,13 @@ import { resolveTaskDir, stripTaskDate, flipStatusSnapshot, writeAtomic } from '
 import { indexHeadings } from './lib/config.mjs';
 import { todayLocal } from './lib/dates.mjs';
 
-export function main({ root, config, t, args }) {
+export function main({ root, config, t, args, _deps = {} }) {
+  // `_deps` 只用于故障注入回归：生产调用不传，行为与原入口一致。把所有事务内可抛点
+  // 收进同一依赖面，才能逐点证明 status/rename/README/双门异常都走同一回滚路径。
+  const io = {
+    mkdirSync, renameSync, rmSync, writeAtomic, checkDocs, checkIndex,
+    ..._deps,
+  };
   const dry = args.includes('--dry-run');
   let summary = '';
   const positionals = [];
@@ -84,62 +90,99 @@ export function main({ root, config, t, args }) {
   //    原状态而非半完成工作树。git add 只在双门全绿后执行。 ─────────────────────
   const beforeStatus = flipTargets.map((f) => ({ f, content: readFileSync(join(dir, f), 'utf8') }));
   const readmeBefore = existsSync(readmeP) ? readFileSync(readmeP, 'utf8') : null;
-  let readmeModified = false;
+  const wlExisted = existsSync(wl);
+  let mutationStarted = false;
+  let readmeTouched = false;
 
-  // 1. status → snapshot(BOM/行尾原样;无 status 行提示人工核,不静默)
-  for (const f of flipTargets) {
-    const p = join(dir, f);
-    const flipped = flipStatusSnapshot(readFileSync(p, 'utf8'));
-    if (flipped === null) console.log(t('closeout.cmdNoStatusLine', { file: f }));
-    else writeAtomic(p, flipped);
-  }
-  // 2. 归档迁移
-  mkdirSync(wl, { recursive: true });
-  renameSync(dir, dest);
-  // 3. worklogs README 登记行
-  if (!existsSync(readmeP)) {
-    console.log(t('closeout.cmdReadmeMissing', { path: relPath(root, readmeP), row }));
-  } else {
-    const raw = readFileSync(readmeP, 'utf8');
-    // 各行保留自身行尾(insertDirRow 同款先例;B13):原实现 split(/\r?\n/) + join(主导行尾)
-    // 会把混合行尾文件整体归一——真变更(一行登记)淹没在满屏 EOL 噪声里。
-    const lines = raw.split(/(?<=\n)/);
-    // 锚定匹配(与 check-index 同契约):原 includes(heading) 是子串命中,
-    // 「## 历史已归档任务说明」这类标题会被抢先当登记节,行插错节。
-    // 围栏感知(B8):围栏里的 `## 已归档任务` 是示例,既不作节起点、也不终结节。
-    const headingRe = new RegExp(`^#{1,6}\\s+${escapeRe(heading)}(?=\\s|$)`);
-    const skip = makeFenceSkipper();
-    const inCode = lines.map((l) => skip(l));
-    const hi = lines.findIndex((l, i) => !inCode[i] && headingRe.test(l));
-    if (hi === -1) {
+  // before-image 回滚不依赖“上一步返回成功”标志：故障注入会刻意模拟“写盘已成功、随后
+  // 抛异常”，所以按磁盘现状判断 rename 是否已发生，并无条件复原全部 status 快照。
+  const rollback = () => {
+    const errors = [];
+    try {
+      if (existsSync(dest) && !existsSync(dir)) renameSync(dest, dir);
+    } catch (e) { errors.push(e); }
+    if (existsSync(dir)) {
+      for (const { f, content } of beforeStatus) {
+        const p = join(dir, f);
+        try { writeAtomic(p, content); } catch (e) { errors.push(e); }
+        try { rmSync(`${p}.tmp-${process.pid}`, { force: true }); } catch (e) { errors.push(e); }
+      }
+    }
+    if (readmeTouched) {
+      try {
+        if (readmeBefore === null) rmSync(readmeP, { force: true });
+        else writeAtomic(readmeP, readmeBefore);
+      } catch (e) { errors.push(e); }
+      try { rmSync(`${readmeP}.tmp-${process.pid}`, { force: true }); } catch (e) { errors.push(e); }
+    }
+    if (!wlExisted && existsSync(wl)) {
+      try { rmSync(wl, { recursive: true, force: false }); } catch (e) { errors.push(e); }
+    }
+    if (errors.length) throw errors[0];
+    console.log(`\n${t('closeout.cmdRolledBack', { dir: rel })}`);
+  };
+
+  let gateFailed = false;
+  try {
+    mutationStarted = true;
+    // 1. status → snapshot(BOM/行尾原样;无 status 行提示人工核,不静默)
+    for (const f of flipTargets) {
+      const p = join(dir, f);
+      const flipped = flipStatusSnapshot(readFileSync(p, 'utf8'));
+      if (flipped === null) console.log(t('closeout.cmdNoStatusLine', { file: f }));
+      else io.writeAtomic(p, flipped);
+    }
+    // 2. 归档迁移
+    io.mkdirSync(wl, { recursive: true });
+    io.renameSync(dir, dest);
+    // 3. worklogs README 登记行
+    if (!existsSync(readmeP)) {
       console.log(t('closeout.cmdReadmeMissing', { path: relPath(root, readmeP), row }));
     } else {
-      let insertAt = hi + 1;
-      for (let i = hi + 1; i < lines.length; i++) {
-        if (!inCode[i] && /^#{1,6}\s/.test(lines[i])) break;
-        if (lines[i].trim() !== '') insertAt = i + 1;
+      const raw = readFileSync(readmeP, 'utf8');
+      // 各行保留自身行尾(insertDirRow 同款先例;B13):原实现 split(/\r?\n/) + join(主导行尾)
+      // 会把混合行尾文件整体归一——真变更(一行登记)淹没在满屏 EOL 噪声里。
+      const lines = raw.split(/(?<=\n)/);
+      // 锚定匹配(与 check-index 同契约):原 includes(heading) 是子串命中,
+      // 「## 历史已归档任务说明」这类标题会被抢先当登记节,行插错节。
+      // 围栏感知(B8):围栏里的 `## 已归档任务` 是示例,既不作节起点、也不终结节。
+      const headingRe = new RegExp(`^#{1,6}\\s+${escapeRe(heading)}(?=\\s|$)`);
+      const skip = makeFenceSkipper();
+      const inCode = lines.map((l) => skip(l));
+      const hi = lines.findIndex((l, i) => !inCode[i] && headingRe.test(l));
+      if (hi === -1) {
+        console.log(t('closeout.cmdReadmeMissing', { path: relPath(root, readmeP), row }));
+      } else {
+        let insertAt = hi + 1;
+        for (let i = hi + 1; i < lines.length; i++) {
+          if (!inCode[i] && /^#{1,6}\s/.test(lines[i])) break;
+          if (lines[i].trim() !== '') insertAt = i + 1;
+        }
+        // 行尾随插入点邻行走;邻行是文件末行且无行尾时先补齐(insertDirRow 同款)
+        const anchor = lines[insertAt - 1];
+        const eol = anchor.endsWith('\r\n') ? '\r\n' : '\n';
+        if (!/\n$/.test(anchor)) lines[insertAt - 1] = `${anchor}${eol}`;
+        lines.splice(insertAt, 0, `${row}${eol}`);
+        readmeTouched = true; // 先置位：即使注入点在“写成后抛”，也必须复原。
+        io.writeAtomic(readmeP, lines.join(''));
       }
-      // 行尾随插入点邻行走;邻行是文件末行且无行尾时先补齐(insertDirRow 同款)
-      const anchor = lines[insertAt - 1];
-      const eol = anchor.endsWith('\r\n') ? '\r\n' : '\n';
-      if (!/\n$/.test(anchor)) lines[insertAt - 1] = `${anchor}${eol}`;
-      lines.splice(insertAt, 0, `${row}${eol}`);
-      writeAtomic(readmeP, lines.join(''));
-      readmeModified = true;
     }
+    // 4. 双门复验(git add 之前——先验后暂存)
+    console.log('');
+    const c1 = io.checkDocs({ root, config, t, args: [] });
+    const c2 = io.checkIndex({ root, config, t, args: [] });
+    gateFailed = Boolean(c1 || c2);
+  } catch (original) {
+    if (mutationStarted) {
+      try { rollback(); } catch (rollbackError) {
+        console.error(`\n${t('closeout.cmdRollbackFailed', { msg: (rollbackError?.message ?? String(rollbackError)).split('\n')[0], dir: rel, dest: relPath(root, dest) })}`);
+      }
+    }
+    // 异常路径维持原语义：回滚是补偿动作，不把 IO/gate 异常吞成普通 exit 1。
+    throw original;
   }
-  // 4. 双门复验(git add 之前——先验后暂存)
-  console.log('');
-  const c1 = checkDocs({ root, config, t, args: [] });
-  const c2 = checkIndex({ root, config, t, args: [] });
-  if (c1 || c2) {
-    // 门红:回滚 before-image。回滚本身失败则给人工恢复命令,不再静默半途。
-    try {
-      renameSync(dest, dir);
-      for (const { f, content } of beforeStatus) writeAtomic(join(dir, f), content);
-      if (readmeModified && readmeBefore !== null) writeAtomic(readmeP, readmeBefore);
-      console.log(`\n${t('closeout.cmdRolledBack', { dir: rel })}`);
-    } catch (e) {
+  if (gateFailed) {
+    try { rollback(); } catch (e) {
       console.error(`\n${t('closeout.cmdRollbackFailed', { msg: (e?.message ?? String(e)).split('\n')[0], dir: rel, dest: relPath(root, dest) })}`);
     }
     return 1;

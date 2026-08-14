@@ -15,9 +15,9 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   CONFIG_NAME, LATEST_SCHEMA_VERSION, SUPPORTED_SCHEMA_VERSIONS,
-  BUILTIN_AUTHORITATIVE, DEFAULTS, parseJsonc, loadConfig, indexHeadings,
+  BUILTIN_AUTHORITATIVE, DEFAULTS, parseJsonc, loadConfig, indexHeadings, resolveRepoPath,
 } from './lib/config.mjs';
-import { parseFrontmatter, parseTables, escapeRe as escRe, makeFenceSkipper } from './lib/frontmatter.mjs';
+import { parseFrontmatter, parseTables, escapeRe as escRe, makeFenceSkipper, FM_DELIM_RE } from './lib/frontmatter.mjs';
 import { deriveId, isValidId, insertIdLine, LINES_DIR, collectGraphDocs, collectIds } from './lib/docmeta.mjs';
 import { slugify, letterTail } from './lib/slug.mjs';
 import { applyEdits } from './lib/jsoncedit.mjs';
@@ -142,7 +142,41 @@ function migrateV4toV5({ raw, text }) {
   const change = configChange(text, next, edits, 'schemaVersion 4 → 5(index 新增可选 mode/outDir;缺省 invariant,行为不变)');
   return {
     changes: [change],
-    notes: ['v5 起可声明 `index.mode: "generated"` 启用生成式索引(改档后重跑 upgrade 完成数据布局迁移)'],
+    notes: ['v5 可声明 `index.mode: "generated"` 启用生成式索引(改档后重跑 upgrade 完成数据布局迁移)'],
+    raw: next,
+    text: change.content,
+  };
+}
+
+/**
+ * v5 → v6:① none 处置把 reasonRequired:true 升为元模型强制槽位；②新增
+ * authoritativeStatuses，显式承载“哪些 status 是当前答案”。迁移严格保留旧引擎语义：
+ * 旧版只认 active，因此 status 含 active 时补 [active]，否则补 []，不猜自定义状态角色。
+ */
+function migrateV5toV6({ raw, text }) {
+  const next = { ...raw, schemaVersion: 6 };
+  const edits = [{ path: ['schemaVersion'], value: 6 }];
+  if (typeof next.$schema === 'string') {
+    next.$schema = next.$schema.replace(/worklogrc(\.v\d+)?\.schema\.json$/, 'worklogrc.v6.schema.json');
+    edits.push({ path: ['$schema'], value: next.$schema });
+  }
+  if (!Array.isArray(next.authoritativeStatuses)) {
+    next.authoritativeStatuses = Array.isArray(next.status) && next.status.includes('active') ? ['active'] : [];
+    edits.push({ op: 'append-property', path: [], key: 'authoritativeStatuses', value: next.authoritativeStatuses });
+  }
+  if (Array.isArray(next.dispositions)) {
+    next.dispositions = next.dispositions.map((d, i) => {
+      if (d?.targetKind !== 'none' || d.reasonRequired === true) return d;
+      if (d.reasonRequired === false) edits.push({ path: ['dispositions', i, 'reasonRequired'], value: true });
+      else edits.push({ op: 'append-property', path: ['dispositions', i], key: 'reasonRequired', value: true });
+      return { ...d, reasonRequired: true };
+    });
+  }
+  const change = configChange(text, next, edits,
+    'schemaVersion 5 → 6(none 强制 reasonRequired:true + authoritativeStatuses 当前权威角色)');
+  return {
+    changes: [change],
+    notes: ['v6 已补 `authoritativeStatuses`（精确保留旧 active 语义）并强制 none 处置填写理由；自定义 status 项目请按实际当前态复核该数组'],
     raw: next,
     text: change.content,
   };
@@ -510,6 +544,25 @@ ${migrated ? `${migrated.trimEnd()}\n` : '(分片由 `worklog-kit upgrade` 生�
  *   ④ todo 迁入:`## <线名>` 分节正文迁入对应分片、原节留指路一行,未匹配分节注记人工;
  *   ⑤ README 职责表补 `status/` 行;⑥ .gitignore 补生成物目录(C-3)。
  */
+/** R2-03:退役横幅落在 frontmatter 收栏之后(无 H1 的兜底落点)。开/收栏判定与
+ *  parseFrontmatter 同标(FM_DELIM_RE 单一实现);无 frontmatter 时退回首行前置
+ * (文件本就缺头,check 会另行报 missingFrontmatter,此处不猜)。BOM 原样保留。 */
+function insertBannerAfterFrontmatter(raw, banner) {
+  const bom = raw.charCodeAt(0) === 0xfeff ? '\ufeff' : '';
+  const text = bom ? raw.slice(1) : raw;
+  // split(/(?<=\n)/) 保留行尾:栏线判定须先剥 EOL(FM_DELIM_RE 是整行锚,带 \n 必失配)
+  const stripEol = (l) => l.replace(/\r?\n$/, '');
+  const lines = text.split(/(?<=\n)/);
+  if (FM_DELIM_RE.test(stripEol(lines[0] ?? ''))) {
+    const end = lines.findIndex((l, i) => i > 0 && FM_DELIM_RE.test(stripEol(l)));
+    if (end !== -1) {
+      const closeLine = lines[end].endsWith('\n') ? lines[end] : `${lines[end]}\n`;
+      return `${bom}${lines.slice(0, end).join('')}${closeLine}${banner}${lines.slice(end + 1).join('')}`;
+    }
+  }
+  return `${bom}${banner}\n${text}`;
+}
+
 function reconcileGenerated(ctx, config, graph, taken, pending, today) {
   const notes = [];
   const D = config.docsDir;
@@ -616,7 +669,12 @@ function reconcileGenerated(ctx, config, graph, taken, pending, today) {
       for (const s of secs) {
         if (!needShard.has(s.slug)) { unmatched.push(s.heading); continue; }
         const body = rebaseOneLevelDeeper(lines.slice(s.start + 1, s.end).join('').trim());
-        if (body) migrated.set(s.slug, body);
+        // R2-04:同名分节重复时正文**合并**进分片,不得后写覆盖先写——两节正文都会
+        // 被清空成指路行,覆盖即静默丢内容(迁移契约是内容保全,宁多勿漏)。
+        if (body) {
+          if (migrated.has(s.slug)) notes.push(`todo 分节「${s.heading}」同名重复,正文已合并进 ${statusDir}/${s.slug}.md,请人工核`);
+          migrated.set(s.slug, migrated.has(s.slug) ? `${migrated.get(s.slug)}\n\n${body}` : body);
+        }
         const eol = lines[s.start].endsWith('\r\n') ? '\r\n' : '\n';
         nextTodo = nextTodo ?? [...lines];
         for (let i = s.start + 1; i < s.end; i++) nextTodo[i] = '';
@@ -628,7 +686,11 @@ function reconcileGenerated(ctx, config, graph, taken, pending, today) {
       const base = (nextTodo ?? [...lines]).join('');
       const h1 = /^#\s.*$/m.exec(base);
       const banner = `\n\n> 📦 滚动状态已分片(generated 档,${today}):各工作线现役状态见 \`${statusDir}/\`;本文件退役,未迁移分节请人工归并。`;
-      const final = h1 ? base.slice(0, h1.index + h1[0].length) + banner + base.slice(h1.index + h1[0].length) : banner + base;
+      // R2-03:无 H1 时横幅不得前置到 frontmatter 开栏之前——那会顶掉 YAML 头、
+      // 让 hasFm 变 false,而写后复验又不查 todo 头,迁移当场自造 missingFrontmatter 门红。
+      const final = h1
+        ? base.slice(0, h1.index + h1[0].length) + banner + base.slice(h1.index + h1[0].length)
+        : insertBannerAfterFrontmatter(base, banner);
       queue(oldTodoTarget, final, `滚动状态源退役留横幅${nextTodo ? `(分节迁入 ${statusDir}/)` : ''}`);
       if (unmatched.length) notes.push(`todo 以下分节不对应任何工作线,未自动迁移,请人工归并或删除:${unmatched.join('、')}`);
     }
@@ -731,6 +793,7 @@ export const MIGRATIONS = [
   { from: 2, to: 3, title: '文档 frontmatter `id` 转必填(按 <created>-<文件名 slug> 自动播种)', plan: migrateV2toV3 },
   { from: 3, to: 4, title: '`line` 收紧为 lines/<slug>.md 实体引用(实体由对账播种,D-007 slug)', plan: migrateV3toV4 },
   { from: 4, to: 5, title: 'index 新增索引形态档 mode(invariant|generated)与生成物目录 outDir(缺省不变)', plan: migrateV4toV5 },
+  { from: 5, to: 6, title: 'none 理由契约强制化 + authoritativeStatuses 显式当前权威角色', plan: migrateV5toV6 },
 ];
 
 /**
@@ -743,7 +806,7 @@ export const MIGRATIONS = [
  * 留着即死配置(§7.4 判据)。v4 对账**包含** v3 的 id 播种,不是替换它。
  */
 export const RECONCILERS = {
-  5: { title: '文档 id 播种 + lines/ 线实体播种(含字母登记表归并/退役、失配报告)+ README 补行 + todo 分节退役 + generated 档 status 分片迁入(幂等)', plan: reconcileV4, verify: verifyV4 },
+  6: { title: '文档 id 播种 + lines/ 线实体播种(含字母登记表归并/退役、失配报告)+ README 补行 + todo 分节退役 + generated 档 status 分片迁入(幂等)', plan: reconcileV4, verify: verifyV4 },
 };
 
 /**
@@ -836,8 +899,16 @@ export function applyChanges(root, changes, stamp, verifiers = []) {
   const written = [];
   const createdDirs = []; // 本批真正新建的目录(B10:回滚时深→浅撤)
   try {
-    for (const c of changes) {
-      const abs = join(root, c.path);
+    // 全集先验、再碰磁盘:若第 N 笔越仓,不能先备份/写完前 N-1 笔才发现。
+    // 这里独立于配置校验,保护 applyChanges 的直接调用与未来迁移生成器缺陷。
+    const resolved = changes.map((c) => {
+      const checked = resolveRepoPath(root, c?.path);
+      if (!checked.ok) throw new Error(`拒绝越仓变更路径 ${JSON.stringify(c?.path)}:${checked.reason}`);
+      return checked.path;
+    });
+    for (let i = 0; i < changes.length; i++) {
+      const c = changes[i];
+      const abs = resolved[i];
       if (existsSync(abs)) { const b = backupName(abs, stamp); copyFileSync(abs, b); backups.push(b); }
       else {
         // 迁移也可能新建文件(如新造的实体目录)。逐级记下将要新建的目录:回滚只还原
@@ -908,12 +979,27 @@ export function main({ root, t, args }) {
   }
   if (!SUPPORTED_SCHEMA_VERSIONS.includes(v)) { console.error(t('upgrade.unsupported', { got: v, supported: SUPPORTED_SCHEMA_VERSIONS.join('/') })); return 2; }
 
+  // upgrade 绕过 CLI 的 requireGoodConfig 是为了让**合法旧版**拿到迁移梯子,不是为了
+  // 允许不可信路径进入规划器。loadConfig 会按磁盘版本选历史 schema,同时把 docsDir /
+  // sourceRoots / disposition 靶点等全部钉在仓内；必须在任何扫描和 change 生成前执行。
+  const preflight = loadConfig(root);
+  if (preflight.errors.length) {
+    for (const e of preflight.errors) console.error(`✗ 配置不可安全迁移:${e}`);
+    return 2;
+  }
+
   // ⚠️ 此处**不得**在 v === LATEST 时早退。曾经如此,那一行正是让存量仓的梯子消失的地方:
   // init 直接 stamp 最新版配置,于是满仓没有 id 的旧文档撞上一句「已是最新版」——
   // 播种代码永远不会执行。改由 planUpgrade 统一回答「要让这个仓真的到位,得改什么」;
   // 真的无事可做时它给出空变更集,幂等性由此保住。
   const plan = planUpgrade(root, raw, v, rawText);
   if (plan.error) { console.error(`✗ ${plan.error}`); return 2; }
+  // 规划器的输出也做第二道全集 containment 预检。dry-run 虽不写盘,仍不得把一个
+  // 越仓计划呈现成可执行方案；真跑还会由 applyChanges 再验一次,防调用边界绕过。
+  for (const c of plan.changes) {
+    const checked = resolveRepoPath(root, c?.path);
+    if (!checked.ok) { console.error(`✗ 拒绝越仓变更路径 ${JSON.stringify(c?.path)}:${checked.reason}`); return 2; }
+  }
   if (!plan.changes.length) {
     // 零变更也可能有注记(F-004:定制/无基线副本「只报不动」)——早退不得吞掉它们
     for (const n of plan.notes) console.log(`  ⚠ ${n}`);
@@ -1082,6 +1168,26 @@ export function selftest() {
     assert(quiet(() => main({ root, t, args: [] })) === 2, 'schemaVersion 非整数时 upgrade exit 2');
   });
 
+  // 配置派生路径先过安全预检:恶意 docsDir 不能进入扫描/规划,更不能备份或改写仓外。
+  {
+    const parent = mkdtempSync(join(tmpdir(), 'wk-upgrade-containment-'));
+    const root = join(parent, 'repo');
+    const outside = join(parent, 'outside');
+    try {
+      mkdirSync(root);
+      mkdirSync(outside);
+      const sentinel = join(outside, 'sentinel.md');
+      writeFileSync(sentinel, '# 仓外哨兵\n');
+      const malicious = { ...v1, schemaVersion: LATEST_SCHEMA_VERSION, docsDir: '../outside' };
+      writeFileSync(join(root, CONFIG_NAME), JSON.stringify(malicious, null, 2));
+      const before = readFileSync(join(root, CONFIG_NAME), 'utf8');
+      const code = quiet(() => main({ root, t, args: [] }));
+      assert(code === 2 && readFileSync(join(root, CONFIG_NAME), 'utf8') === before, '越仓 docsDir 在规划前受控拒绝 exit 2 且配置零写入');
+      assert(readFileSync(sentinel, 'utf8') === '# 仓外哨兵\n'
+        && readdirSync(outside).every((n) => !n.includes('.bak-')), '越仓 docsDir 不读写/备份仓外哨兵');
+    } finally { rmSync(parent, { recursive: true, force: true }); }
+  }
+
   // 5. registry 逐级无断链:每个受支持版本都能走到最新版
   for (const v of SUPPORTED_SCHEMA_VERSIONS) {
     const root = mkdtempSync(join(tmpdir(), 'wk-upgrade-reg-')); // v2→v3 会读 docs,须给它一个真目录
@@ -1153,7 +1259,10 @@ export function selftest() {
   // ── 对账:配置已是最新版、文档却没到位(存量仓 init 后的真实形态)──────────────
   // 这条是本阶段实测挖出的洞:曾经 `v === LATEST` 就早退,于是 init 出来的存量仓
   // 一个梯子都拿不到——播种代码永远不会执行。
-  const vLatest = { ...v2, schemaVersion: LATEST_SCHEMA_VERSION, types: [...v2.types, { name: 'line', canBeAuthoritative: false }] };
+  const vLatest = {
+    ...v2, schemaVersion: LATEST_SCHEMA_VERSION, authoritativeStatuses: ['active'],
+    types: [...v2.types, { name: 'line', canBeAuthoritative: false }],
+  };
   // 线实体 fixture:v4 起 line 引用要有实体;「无事可做」类用例须预置它,否则对账会去播种
   const lineEnt = (slug) => `---\nid: 2026-01-01-线-${slug}\nstatus: active\ntype: line\nline: ${slug}\ncreated: 2026-01-01\n---\n\n# ${slug}\n`;
   withDocs(vLatest, { 'docs/designs/a.md': doc(), 'docs/todo.md': doc({ type: 'index' }) }, (root) => {
@@ -1262,15 +1371,48 @@ export function selftest() {
     });
   }
 
-  // ── v4 → v5:只推版本号与 $schema,不强塞新键(mode 缺省 invariant = 行为不变)──
+  // ── v4 → v6:先过保持行为的 v5，再由 v5→v6 补新强制槽位──
   {
-    const v4 = { ...v2, schemaVersion: 4, types: [...v2.types, { name: 'line', canBeAuthoritative: false }], dirs: [...v1.dirs, 'lines'] };
+    const v4 = {
+      ...v2,
+      schemaVersion: 4,
+      types: [...v2.types, { name: 'line', canBeAuthoritative: false }],
+      dirs: [...v1.dirs, 'lines'],
+      dispositions: [...v2.dispositions, { name: 'legacy-none', targetKind: 'none' }],
+    };
     withDocs(v4, { 'docs/designs/a.md': doc({ id: '2026-01-01-a' }), 'docs/lines/x.md': lineEnt('x') }, (root) => {
-      assert(quiet(() => main({ root, t, args: [] })) === 0, 'v4→v5 exit 0');
+      assert(loadConfig(root).errors.length === 0, 'v4 历史 none 省略 reasonRequired 仍可读(迁移梯子不锁死)');
+      assert(quiet(() => main({ root, t, args: [] })) === 0, 'v4→v6 exit 0');
       const cfg = readCfg(root);
-      assert(cfg.schemaVersion === 5 && /worklogrc\.v5\.schema\.json$/.test(cfg.$schema), 'v4→v5 推版本号并改指 v5 schema');
+      assert(cfg.schemaVersion === 6 && /worklogrc\.v6\.schema\.json$/.test(cfg.$schema), 'v4→v6 推版本号并改指 v6 schema');
       assert(cfg.index === undefined, 'v4→v5 不强塞 index 键(用户没声明的键迁移不替他发明)');
-      assert(loadConfig(root).errors.length === 0, 'v5 产物过配置校验');
+      assert(cfg.dispositions.find((d) => d.name === 'legacy-none')?.reasonRequired === true,
+        'v5→v6 给历史 targetKind:none 自动补 reasonRequired:true');
+      assert(JSON.stringify(cfg.authoritativeStatuses) === '["active"]', 'v5→v6 补当前权威角色并精确保留旧 active 语义');
+      assert(loadConfig(root).errors.length === 0, 'v6 产物过配置校验');
+    });
+  }
+  // v5 是已发布契约：none 缺键/显式 false 都必须先可读，再由 v5→v6 外科修正。
+  for (const [label, disposition] of [
+    ['缺键', { name: 'legacy-none', targetKind: 'none' }],
+    ['显式 false', { name: 'legacy-none', targetKind: 'none', reasonRequired: false }],
+  ]) {
+    const v5 = {
+      ...v2, $schema: './schema/worklogrc.v5.schema.json', schemaVersion: 5,
+      types: [...v2.types, { name: 'line', canBeAuthoritative: false }],
+      dirs: [...v1.dirs, 'lines'], dispositions: [...v2.dispositions, disposition],
+    };
+    withDocs(v5, { 'docs/designs/a.md': doc({ id: '2026-01-01-a' }), 'docs/lines/x.md': lineEnt('x') }, (root) => {
+      assert(loadConfig(root).errors.length === 0, `v5 none ${label}仍可读（梯子先于门）`);
+      assert(quiet(() => main({ root, t, args: ['--dry-run'] })) === 0 && readCfg(root).schemaVersion === 5,
+        `v5 none ${label}可 dry-run 且零写入`);
+      assert(quiet(() => main({ root, t, args: [] })) === 0, `v5 none ${label}正式升级成功`);
+      const cfg = readCfg(root);
+      assert(cfg.schemaVersion === 6 && cfg.dispositions.at(-1).reasonRequired === true,
+        `v5 none ${label}迁为 v6 reasonRequired:true`);
+      const once = readFileSync(join(root, CONFIG_NAME), 'utf8');
+      assert(quiet(() => main({ root, t, args: [] })) === 0
+        && readFileSync(join(root, CONFIG_NAME), 'utf8') === once, `v5 none ${label}升级后二跑幂等`);
     });
   }
 
@@ -1468,6 +1610,31 @@ export function selftest() {
       assert(!readFileSync(join(root, 'docs', 'status', '乙线.md'), 'utf8').includes('围栏内示例'),
         'B8:乙线分片不含围栏内示例(fence-blind 曾把示例当真分节迁走)');
     });
+    // R2-03:todo 无 H1 时退役横幅必须落在 frontmatter 收栏之后——曾前置到开栏之前,
+    // 顶掉 YAML 头(hasFm 变 false、id/status 全失),写后复验又不查 todo 头,迁移自造门红。
+    withDocs(cfgGen, {
+      'docs/lines/甲线.md': lineFm('甲线'),
+      'docs/todo.md': `---\nid: 2026-01-01-滚动\nstatus: active\ntype: index\nline: 甲线\ncreated: 2026-01-01\n---\n\n## 甲线\n\n- 无大标题的待办\n`,
+    }, (root) => {
+      assert(quiet(() => main({ root, t, args: [] })) === 0, 'R2-03:todo 无 H1 的 generated 对账 exit 0');
+      const td = readFileSync(join(root, 'docs', 'todo.md'), 'utf8');
+      const fm = parseFrontmatter(td);
+      assert(td.startsWith('---') && fm.hasFm === true && fm.data.id === '2026-01-01-滚动' && fm.data.status === 'active',
+        'R2-03:横幅不再前置,frontmatter 完整可解析(id/status 不丢)');
+      assert(td.includes('本文件退役') && td.includes('已迁入 `docs/status/甲线.md`'), 'R2-03:横幅与指路行都在 todo');
+      assert(readFileSync(join(root, 'docs', 'status', '甲线.md'), 'utf8').includes('- 无大标题的待办'), 'R2-03:正文迁入分片');
+    });
+    // R2-04:同名分节重复时两节正文都进分片——后写覆盖先写曾让早节正文静默丢失。
+    withDocs(cfgGen, {
+      'docs/lines/甲线.md': lineFm('甲线'),
+      'docs/todo.md': `---\nid: 2026-01-01-滚动\nstatus: active\ntype: index\nline: 甲线\ncreated: 2026-01-01\n---\n\n# 滚动状态\n\n## 甲线\n\n- 第一段待办\n\n## 甲线\n\n- 第二段待办\n`,
+    }, (root) => {
+      assert(quiet(() => main({ root, t, args: [] })) === 0, 'R2-04:重名分节 todo 对账 exit 0');
+      const jia = readFileSync(join(root, 'docs', 'status', '甲线.md'), 'utf8');
+      assert(jia.includes('第一段待办') && jia.includes('第二段待办'), 'R2-04:两节正文都迁入分片(早节不再被覆盖丢失)');
+      const td = readFileSync(join(root, 'docs', 'todo.md'), 'utf8');
+      assert(!td.includes('第一段待办') && !td.includes('第二段待办'), 'R2-04:todo 原两节都改指路行');
+    });
     // R6-04:brownfield 直接声明 generated 再首跑 upgrade——线实体与分片**同批**播种。
     // 原缺陷:分片集合只扫盘上 graph,同批待播实体拿不到分片 → 写后复验必败 → 整体回滚
     // → 重跑同败(死锁);--dry-run 不跑复验,预览一切正常,坑只在真跑时炸。
@@ -1517,7 +1684,7 @@ export function selftest() {
     const root = mkdtempSync(join(tmpdir(), 'wk-upgrade-rollback-'));
     try {
       const okCfg = {
-        schemaVersion: LATEST_SCHEMA_VERSION, docsDir: 'docs', dirs: ['designs'], status: ['active'],
+        schemaVersion: LATEST_SCHEMA_VERSION, docsDir: 'docs', dirs: ['designs'], status: ['active'], authoritativeStatuses: ['active'],
         types: [{ name: 'design', canBeAuthoritative: true }],
         dispositions: [{ name: 'experience', targetKind: 'docs' }],
       };
@@ -1538,6 +1705,20 @@ export function selftest() {
       const r2 = applyChanges(root, [{ path: 'docs/lines/新线.md', content: '# 新\n', desc: 'x' }], '20260101000001', [() => ['再次注入失败']]);
       assert(r2.ok === false && existsSync(join(root, 'docs', '用户手记.md')) && existsSync(join(root, 'docs'))
         && !existsSync(join(root, 'docs', 'lines')), 'B10:携用户内容的目录留、纯本批新建的子目录撤');
+
+      // 全集先验:即使越仓项排在合法项之后,也必须在第一笔备份/写入前整体拒绝。
+      const outside = join(root, '..', `wk-upgrade-outside-${process.pid}.md`);
+      writeFileSync(outside, 'outside-before');
+      const safeBefore = readFileSync(join(root, CONFIG_NAME), 'utf8');
+      const r3 = applyChanges(root, [
+        { path: CONFIG_NAME, content: 'would-write', desc: 'x' },
+        { path: `../${outside.split(/[\\/]/).pop()}`, content: 'outside-after', desc: 'x' },
+      ], '20260101000002');
+      assert(r3.ok === false && r3.restored === true
+        && readFileSync(join(root, CONFIG_NAME), 'utf8') === safeBefore, 'applyChanges 越仓路径全集预检,合法前项也零写入');
+      assert(readFileSync(outside, 'utf8') === 'outside-before'
+        && !existsSync(`${outside}.bak-20260101000002`), 'applyChanges 不改写/备份仓外文件');
+      rmSync(outside, { force: true });
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
 

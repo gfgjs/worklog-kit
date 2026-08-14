@@ -8,7 +8,7 @@
 //
 // 「非 Node」是刻意的:首要消费者 Scrollery 是 Rust/Tauri 仓(L11),init 与 CI 都不得
 // 假设 package.json 或 npm 依赖拓扑存在(D-017)。mkdtemp 给的空目录天然满足这条。
-import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, readdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { main as init, detectProfile } from './init.mjs';
@@ -22,6 +22,7 @@ import { main as closeoutCmd } from './closeout.mjs';
 import { loadConfig, DEFAULTS, LATEST_SCHEMA_VERSION } from './lib/config.mjs';
 import { parseFrontmatter } from './lib/frontmatter.mjs';
 import { makeTranslator } from './lib/i18n.mjs';
+import { writeAtomic } from './lib/fsutil.mjs';
 
 const t = makeTranslator('zh');
 
@@ -330,6 +331,40 @@ export function selftest() {
       'closeout --dry-run 零迁移');
     writeFileSync(join(pl, 'closeout.md'), coBody.replace('owner: 小明', 'owner: mallory'));
     assert(quiet(() => closeoutCmd({ root, config: loadConfig(root).config, t, args: ['协作任务'] })).code === 2, '非 owner 收口起跑线即拒(E6 前置)');
+    writeFileSync(join(pl, 'closeout.md'), coBody);
+
+    // P1 事务故障注入：每个可抛阶段都模拟“已写盘再抛”，并断言抛回原异常对象。
+    // rollback 刻意不用注入依赖，避免同一故障桩把补偿动作也击穿而形成假负例。
+    const originalFiles = ['task_plan.md', 'findings.md', 'closeout.md']
+      .map((f) => [f, readFileSync(join(pl, f), 'utf8')]);
+    const originalReadme = readFileSync(wlP, 'utf8');
+    const unchangedAfterThrow = (label, deps) => {
+      const sentinel = new Error(`inject:${label}`);
+      let caught;
+      try {
+        quiet(() => closeoutCmd({ root, config: loadConfig(root).config, t, args: ['协作任务'], _deps: deps(sentinel) }));
+      } catch (e) { caught = e; }
+      const noArchive = readdirSync(join(root, 'docs', 'worklogs')).every((n) => !n.includes('协作任务'));
+      const filesRestored = originalFiles.every(([f, raw]) => readFileSync(join(pl, f), 'utf8') === raw);
+      assert(caught === sentinel && existsSync(pl) && noArchive && filesRestored && readFileSync(wlP, 'utf8') === originalReadme,
+        `closeout ${label} 抛异常 ⇒ 原异常透传且 status/rename/README 全回滚`);
+    };
+    unchangedAfterThrow('status 写盘', (sentinel) => ({
+      writeAtomic: (p, raw) => { writeAtomic(p, raw); throw sentinel; },
+    }));
+    unchangedAfterThrow('rename', (sentinel) => ({
+      renameSync: (from, to) => { renameSync(from, to); throw sentinel; },
+    }));
+    unchangedAfterThrow('README 写盘', (sentinel) => ({
+      writeAtomic: (p, raw) => { writeAtomic(p, raw); if (p === wlP) throw sentinel; },
+    }));
+    unchangedAfterThrow('check-docs gate', (sentinel) => ({
+      checkDocs: () => { throw sentinel; },
+    }));
+    unchangedAfterThrow('check-index gate', (sentinel) => ({
+      checkDocs: () => 0,
+      checkIndex: () => { throw sentinel; },
+    }));
     // 事务回滚(复审 §P1-06/R7-08):closeout.md 过 preflight(owner 对)但双门红(verified=no)
     // ⇒ 先 mutate 后验、门红回滚——用户拿到收口前的干净工作树,不是半完成状态
     writeFileSync(join(pl, 'closeout.md'), coBody.replace('| yes |', '| no |'));
@@ -403,8 +438,8 @@ export function selftest() {
       mkdirSync(join(abs, '..'), { recursive: true });
       writeFileSync(abs, content);
     }
-    // 第一程:v1 → v5(invariant)。字母登记表归并/退役、id 播种、线实体、README 补行、todo 分节退役
-    assert(quiet(() => upgrade({ root, t, args: [] })).code === 0, '升档第一程 v1→v5 exit 0');
+    // 第一程:v1 → 最新版(invariant)。字母登记表归并/退役、id 播种、线实体、README 补行、todo 分节退役
+    assert(quiet(() => upgrade({ root, t, args: [] })).code === 0, `升档第一程 v1→v${LATEST_SCHEMA_VERSION} exit 0`);
     const after1 = loadConfig(root);
     assert(after1.fileVersion === LATEST_SCHEMA_VERSION && after1.errors.length === 0, '配置落最新版且过校验');
     assert(parseFrontmatter(readFileSync(join(root, D, 'designs', 'a.md'), 'utf8')).data.id === '2026-01-03-a', '存量文档播上 id');

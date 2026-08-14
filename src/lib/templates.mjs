@@ -115,7 +115,7 @@ export function selftest() {
     if (cond) console.log(`  ✓ ${name}`);
     else { console.error(`  ✗ ${name}`); failed++; }
   };
-  const config = { docsDir: 'docs', schemaVersion: 5, profile: 'strict' };
+  const config = { docsDir: 'docs', schemaVersion: 6, profile: 'strict' };
   const put = (root, rel, content) => {
     const abs = join(root, ...rel.split('/'));
     mkdirSync(join(abs, '..'), { recursive: true });

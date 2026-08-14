@@ -8,12 +8,12 @@
 //   2.  活区 .md 须有合法 frontmatter(status ∈ 枚举 / type ∈ 枚举 / created)。
 //   3.  archive/ 文件文首须带状态横幅;活区不得出现「已死」状态。
 //   4.  worklogs/ 归档任务须带 closeout.md,声明候选恰好各处置一次。
-import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, writeFileSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { walk, relPath, DOCS_SKIP } from './lib/fsutil.mjs';
 import { parseTables, parseFrontmatter, escapeRe, makeFenceSkipper } from './lib/frontmatter.mjs';
-import { DEFAULTS } from './lib/config.mjs';
+import { DEFAULTS, isCurrentAuthority, resolveRepoPath } from './lib/config.mjs';
 import { locOf, BASELINE_ELIGIBLE } from './lib/violations.mjs';
 import { reportViolations } from './lib/gate.mjs';
 import { slugify, isNFC } from './lib/slug.mjs';
@@ -73,24 +73,73 @@ export function validateRepoRef(root, ref, opts = {}) {
  * 提取一行散文里的 markdown 链接靶点(R6-03)。原正则 `\]\(([^)]+)\)` 在**第一个** `)`
  * 截断,半角括号文件名(`a(1).md`)必假红——而 1b 侧注释早已写明「文件名里的括号合法」,
  * 只有全角括号才安全是两门的读法分叉。此处对 `](` 之后做括号配对计数取真关闭括号;
- * 未闭合的 `](` 视为非链接,本行余下放弃。
+ * title 只在 destination 后经空白分隔时才开始；文件名里的引号是普通字符。
  */
 function linkTargetsOf(prose) {
   const out = [];
   let i = 0;
   while ((i = prose.indexOf('](', i)) !== -1) {
-    let depth = 1;
     let j = i + 2;
-    while (j < prose.length && depth > 0) {
-      if (prose[j] === '(') depth++;
-      else if (prose[j] === ')') depth--;
-      j++;
+    while (/\s/.test(prose[j] ?? '')) j++;
+    let target = '', bracketed = false;
+    if (prose[j] === '<') {
+      bracketed = true; j++;
+      let escaped = false, closed = false;
+      for (; j < prose.length; j++) {
+        const ch = prose[j];
+        if (!escaped && ch === '>') { closed = true; j++; break; }
+        target += ch;
+        if (!escaped && ch === '\\') escaped = true; else escaped = false;
+      }
+      if (!closed) { i += 2; continue; }
+    } else {
+      let depth = 0, escaped = false;
+      for (; j < prose.length; j++) {
+        const ch = prose[j];
+        if (escaped) { target += ch; escaped = false; continue; }
+        if (ch === '\\') { target += ch; escaped = true; continue; }
+        if (/\s/.test(ch)) break;
+        if (ch === '(') { depth++; target += ch; continue; }
+        if (ch === ')') {
+          if (depth === 0) break;
+          depth--; target += ch; continue;
+        }
+        target += ch;
+      }
+      if (depth !== 0) { i += 2; continue; }
     }
-    if (depth !== 0) break;
-    out.push(prose.slice(i + 2, j - 1));
-    i = j;
+    const hadSpace = /\s/.test(prose[j] ?? '');
+    while (/\s/.test(prose[j] ?? '')) j++;
+    if (hadSpace && ['"', "'", '('].includes(prose[j])) {
+      const open = prose[j++], close = open === '(' ? ')' : open;
+      let escaped = false, closed = false;
+      for (; j < prose.length; j++) {
+        const ch = prose[j];
+        if (!escaped && ch === close) { closed = true; j++; break; }
+        if (!escaped && ch === '\\') escaped = true; else escaped = false;
+      }
+      if (!closed) { i += 2; continue; }
+      while (/\s/.test(prose[j] ?? '')) j++;
+    }
+    if (prose[j] !== ')') { i += 2; continue; }
+    out.push({ target, bracketed });
+    i = j + 1;
   }
   return out;
+}
+
+/** CommonMark backslash escape 在 URI 交给文件系统前还原；只还原 ASCII 标点。 */
+const unescapeLinkTarget = (s) => s.replace(/\\([!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~])/g, '$1');
+
+/** 只在未被反斜杠转义的 `#` 处切 fragment；`foo\#bar.md` 的 # 属文件名。 */
+function withoutLinkFragment(s) {
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (!escaped && ch === '#') return s.slice(0, i);
+    if (!escaped && ch === '\\') escaped = true; else escaped = false;
+  }
+  return s;
 }
 
 /**
@@ -104,6 +153,17 @@ function linkTargetExists(baseDir, target) {
   for (const v of [...variants]) variants.add(v.normalize('NFC'));
   for (const v of variants) if (existsSync(resolve(baseDir, v))) return true;
   return false;
+}
+
+/** `repo:` 落点/去重证据必须是仓内真实普通文件；最终与中间 symlink 都不可逃逸。 */
+const isRepoFile = (root, path) => resolveRepoPath(root, path, { needExist: true, needFile: true }).ok;
+
+/** none 的理由须承载判断，空白与常见占位文本都不算理由。 */
+function hasMeaningfulReason(reason) {
+  const s = (reason ?? '').trim();
+  if (!s) return false;
+  return !/^(?:—|-+|…|\.{3}|n\/?a|na|none|null|无|暂无|待填|待补|todo|tbd|placeholder|占位)[。.!！]?$/i.test(s)
+    && !/^<[^>]*(?:理由|reason|待填|todo|tbd|placeholder|占位)[^>]*>$/i.test(s);
 }
 
 /**
@@ -197,7 +257,9 @@ function checkDispositionTarget(o) {
   const rep = (ruleKey, params) => report({ file, rule: ruleKey, params });
   if (rule.targetKind === 'none') {
     if (target !== '—') rep('closeout.noPromoTarget', { id });
-    if (rule.reasonRequired && (!naReason || naReason === '—')) rep('closeout.noPromoReason', { id });
+    // targetKind 的语义属元模型、不是实例开关:none 永远要求非占位理由。
+    // reasonRequired 只为旧配置兼容保留在形状层，不能把核心收口契约关掉。
+    if (!hasMeaningfulReason(naReason)) rep('closeout.noPromoReason', { id });
     if (dedup !== '—') rep('closeout.noPromoDedup', { id });
     return;
   }
@@ -216,7 +278,7 @@ function checkDispositionTarget(o) {
       // 靶点由**配置**给出,同样过 containment——配置写 `../x` 不该比 closeout 写 `../x` 更可信
       const r = validateRepoRef(root, target);
       if (!r.ok) rep('closeout.targetEscape', { id, target });
-      else if (!existsSync(r.abs)) rep('closeout.docsMissing', { id, path: r.path });
+      else if (!isRepoFile(root, r.path)) rep('closeout.docsMissing', { id, path: r.path });
     }
   } else if (rule.targetKind === 'line-status') {
     // D-014:靶点随候选所属**工作线**变化,配置只声明根目录,靶点由任务的 `line` 求解。
@@ -236,14 +298,14 @@ function checkDispositionTarget(o) {
     } else {
       const r = validateRepoRef(root, target);
       if (!r.ok) rep('closeout.targetEscape', { id, target });
-      else if (!existsSync(r.abs)) rep('closeout.docsMissing', { id, path: r.path });
+      else if (!isRepoFile(root, r.path)) rep('closeout.docsMissing', { id, path: r.path });
     }
   } else { // docs
     const r = validateRepoRef(root, target);
     if (!r.ok) {
       if (r.reason === 'escape') rep('closeout.targetEscape', { id, target });
       else rep('closeout.docsGrammar', { id, target: target || '空' });
-    } else if (!existsSync(r.abs)) rep('closeout.docsMissing', { id, path: r.path });
+    } else if (!isRepoFile(root, r.path)) rep('closeout.docsMissing', { id, path: r.path });
   }
   if (dedup !== 'new') {
     // 越仓与语法错要分开报:写 `repo:../x.md` 的人语法是对的,错在路径越仓——
@@ -252,7 +314,7 @@ function checkDispositionTarget(o) {
     if (!r.ok) {
       if (r.reason === 'escape') rep('closeout.dedupEscape', { id, dedup });
       else rep('closeout.dedupInvalid', { id, dedup: dedup || '空' });
-    }
+    } else if (!isRepoFile(root, r.path)) rep('closeout.dedupInvalid', { id, dedup });
   }
 }
 
@@ -446,10 +508,18 @@ export function checkTeamAndTaskNames(root, config, report) {
  * 按 D-013,本函数报的一切(supersededNoRef 除外)都是图违规,**不入 baseline 允许清单**。
  */
 export function checkGraphInvariants(config, graph, report) {
-  // 组合不变量只对状态机的**既知词汇**说话(§7.2:draft→active→snapshot|superseded|archived,
-  // 机器面 ASCII,R3-1)。status 枚举是实例可配的,但自定义状态的生死语义机器不知道——不猜。
-  const LIVE = new Set(['draft', 'active']);
-  const DEAD_LINE = new Set(['archived', 'superseded']);
+  // supersededNoRef 是既有 canonical 状态机的专属规则；没有 status role 元模型时
+  // 无法把“被取代”泛化到任意实例值，故保留兼容、不猜语义。与之不同，「被取代与现役
+  // 互斥」的现役 = 权威角色元模型(authoritativeStatuses,与权威唯一/线引用同源,R2-02);
+  // legacy draft 兼容保留——旧状态机把草稿视为活态,「边起草边宣告被取代」仍是自相矛盾
+  // 的声明形态,不缩窄既有判定。
+  const CURRENT = new Set(['draft', ...(config.authoritativeStatuses || [])]);
+  const deprecated = new Set(config.deprecatedStatuses || []);
+  // canonical archived 是关线墓碑的既有契约，却刻意不在默认 deprecatedStatuses 中
+  //（否则墓碑自身触发 statusDeprecated）；作为旧布局兼容并入死线集合。实例自定义死状态
+  // 则只取配置真源，不猜名字。
+  const DEAD_LINE = new Set(['archived', ...deprecated]);
+  const FROZEN_OR_DEAD = new Set(['snapshot', 'superseded', 'archived', ...deprecated]);
   const byId = collectIds(graph, (id, g, prev) =>
     // id 唯一性是图不变量(主语是 id,不是某个文件)→ 按 D-013 不可 baseline
     report({ file: g.rel, rule: 'docs.idDuplicate', params: { id, other: prev.rel } }));
@@ -485,20 +555,21 @@ export function checkGraphInvariants(config, graph, report) {
     if (data.status === 'superseded' && !(data.supersededBy ?? '').trim()) rep('docs.supersededNoRef');
     // 组合合法性:声明 supersededBy = 承认已被取代,与现役状态互斥。没有这条,
     // 成对双向一致 + 旧文档忘了改 status 依旧两个「现役」并存——双活恰好绕过所有门
-    if ((data.supersededBy ?? '').trim() && LIVE.has(data.status)) rep('docs.supersededButAlive', { status: data.status });
-    // 权威唯一:每 (line, authorityScope) 至多一个 active+authoritative;scope 缺省 = 整线。
+    if ((data.supersededBy ?? '').trim() && CURRENT.has(data.status)) rep('docs.supersededButAlive', { status: data.status });
+    // 权威唯一:每 (line, authorityScope) 至多一个“当前态 + authoritative:true”；scope 缺省 = 整线。
     // 键取 slugify(line):「甲线(K)」与「甲线」是同一条线(D-007),不归并即各占一键假绿。
     // 键做**精确相等**,不判「整线 ⊇ 某 scope」的包含关系——那要机器懂 scope 语义,§7.2 没许诺
-    if (data.status === 'active' && data.authoritative === 'true' && data.line) {
+    if (isCurrentAuthority(config, data) && data.line) {
       const key = `${slugify(data.line)}\u0000${(data.authorityScope ?? '').trim()}`;
       const prev = authSeen.get(key);
       if (prev) rep('docs.authorityDuplicate', { line: data.line, scope: (data.authorityScope ?? '').trim() || '整线', other: prev.rel });
       else authSeen.set(key, g);
     }
-    // 归档线引用禁令(拆线/并线,§7.2):现役文档不得引用已死的线实体。
-    // snapshot/superseded 文档不受此限——冻结件的 line 是历史事实,不该被迫改写;
+    // 归档线引用禁令(拆线/并线,§7.2):非冻结/非死文档不得引用已死的线实体。
+    // canonical snapshot/superseded/archived 是旧契约兼容；自定义死状态来自配置。
+    // 这些文档的 line 是历史事实,不该被迫改写;
     // 墓碑实体自身也天然豁免(它的 status 就是 archived,不在现役集合里)。
-    if (data.line && LIVE.has(data.status)) {
+    if (data.line && !FROZEN_OR_DEAD.has(data.status)) {
       const slug = slugify(data.line);
       const st = lineStatus.get(slug);
       if (st && DEAD_LINE.has(st)) rep('docs.lineArchivedRef', { line: data.line, status: st, entity: `${config.docsDir}/${LINES_DIR}/${slug}.md` });
@@ -532,15 +603,15 @@ export function checkDocsAndLinks(root, config, report, linksOnly) {
     lines.forEach((text, i) => {
       if (inCode(text)) return;
       const prose = text.replace(/`[^`]*`/g, ''); // 行内代码是语法示意,非活链接
-      for (const raw of linkTargetsOf(prose)) {
-        let target = raw.trim();
+      for (const parsed of linkTargetsOf(prose)) {
+        let { target } = parsed;
         // CommonMark `<...>` 包裹目标(第七轮 P2):含空格路径的**合法**链接写法,
         // 旧实现见 `<` 一律跳过 ⇒ 该类断链静默放行。剥包裹后照常验存;
         // 空格只在包裹形态下放行(裸目标含空白仍非链接语法,照旧跳)。
-        const bracketed = target.startsWith('<') && target.endsWith('>');
-        if (bracketed) target = target.slice(1, -1).trim();
+        const { bracketed } = parsed;
         if (/^(https?:|mailto:|#|tauri:)/.test(target)) continue;
-        target = target.split('#')[0].trim();
+        target = withoutLinkFragment(target).trim();
+        target = unescapeLinkTarget(target);
         if (!target || !/[./]/.test(target) || target.includes('<') || (!bracketed && /\s/.test(target))) continue;
         const abs = resolve(dirname(file), target);
         const outOfScope = !abs.startsWith(DOCS + sep) && dirname(abs) !== root;
@@ -572,10 +643,9 @@ export function checkDocsAndLinks(root, config, report, linksOnly) {
     // ——那是在描述**消费仓**的路径,本仓没有也不该有该文件;不剥即假红(R4-11 放行仓根文件后必现)。
     const isMd = file.endsWith('.md');
     const lines = readFileSync(file, 'utf8').split(/\r?\n/);
-    let inFence = false;
+    const skipFence = isMd ? makeFenceSkipper() : null;
     lines.forEach((text, i) => {
-      if (isMd && /^\s*(```|~~~)/.test(text)) { inFence = !inFence; return; }
-      if (isMd && inFence) return; // 围栏内是示例,同理
+      if (skipFence?.(text)) return; // 围栏内(含定界行)是示例；同字符/长度规则复用单一实现
       const scan = isMd ? text.replace(/`[^`]*`/g, '') : text;
       for (const m of scan.matchAll(docRefRe)) {
         if (!existsSync(join(root, m[0]))) report({ file: rfn(file), line: i + 1, rule: 'docs.refUnreachable', params: { ref: m[0] } });
@@ -743,6 +813,21 @@ export function selftest() {
       ...trio(['F-001']),
       [CO]: closeoutWith([`| F-001 | experience | repo:${D}/experience.md | — | repo:${D}/experience.md | — | yes |`]),
     }],
+    ['bad-target 指向目录(存在但不是可读落点)', true, 'closeout', {}, {
+      [`${D}/existing/.keep`]: 'x',
+      ...trio(['F-001']),
+      [CO]: closeoutWith([`| F-001 | experience | repo:${D}/existing | — | new | — | yes |`]),
+    }],
+    ['bad-去重证据指向不存在文件(语法正确也不算证据)', true, 'closeout', {}, {
+      [`${D}/experience.md`]: 'x',
+      ...trio(['F-001']),
+      [CO]: closeoutWith([`| F-001 | experience | repo:${D}/experience.md | — | repo:${D}/ghost.md | — | yes |`]),
+    }],
+    ['bad-去重证据指向目录(容器不是既有知识)', true, 'closeout', {}, {
+      [`${D}/experience.md`]: 'x', [`${D}/existing/.keep`]: 'x',
+      ...trio(['F-001']),
+      [CO]: closeoutWith([`| F-001 | experience | repo:${D}/experience.md | — | repo:${D}/existing | — | yes |`]),
+    }],
     // F-023 门层 dogfood:某格含字面竖线 `\|`,门按位置解构七列仍不错位(旧 split 断幻影列
     // → hdr 长度 7≠8 → 假报 closeout.tableSchema)。naReason 是 no-promotion 唯一必填自由文本格。
     ['ok-转义竖线不炸列(F-023:格内 `\\|` 是字面竖线,非列界)', false, 'closeout', {}, {
@@ -781,6 +866,16 @@ export function selftest() {
     ['bad-nopromo缺理由', true, 'closeout', {}, {
       ...trio(['F-001']),
       [CO]: closeoutWith(['| F-001 | no-promotion | — | — | — | — | yes |']),
+    }],
+    ['bad-nopromo 即使 reasonRequired=false 仍须理由(targetKind none 的元模型语义)', true, 'closeout', {
+      dispositions: DEFAULTS.dispositions.map((d) => d.name === 'no-promotion' ? { ...d, reasonRequired: false } : d),
+    }, {
+      ...trio(['F-001']),
+      [CO]: closeoutWith(['| F-001 | no-promotion | — | — | — | — | yes |']),
+    }],
+    ['bad-nopromo 占位理由不算理由', true, 'closeout', {}, {
+      ...trio(['F-001']),
+      [CO]: closeoutWith(['| F-001 | no-promotion | — | — | — | TODO | yes |']),
     }],
     ['bad-docs目标不存在', true, 'closeout', {}, {
       ...trio(['F-001']),
@@ -942,6 +1037,15 @@ export function selftest() {
       [`${D}/designs/a.md`]: fm('active', 'design') + '\n[b](<./b file.md>)\n',
       [`${D}/designs/b file.md`]: fm('active', 'design'),
     }],
+    ['bad-合法可选 title 不得遮蔽断链', true, 'docs', {}, {
+      ...LX,
+      [`${D}/designs/a.md`]: fm('active', 'design') + '\n[x](./gone.md "可选标题")\n',
+    }],
+    ['ok-合法可选 title 与存在目标正确拆分', false, 'docs', {}, {
+      ...LX,
+      [`${D}/designs/a.md`]: fm('active', 'design') + '\n[b](./b.md \'可选标题\')\n',
+      [`${D}/designs/b.md`]: fm('active', 'design'),
+    }],
     ['bad-archive缺横幅', true, 'docs', {}, { [`${D}/archive/old.md`]: '# 无横幅归档件\n' }],
     ['ok-archive有横幅', false, 'docs', {}, { [`${D}/archive/old.md`]: '# 旧件\n\n> 📦 已归档,被 X 取代。\n' }],
     ['bad-1b引用不可达', true, 'docs', { sourceRoots: ['code'] }, {
@@ -953,6 +1057,9 @@ export function selftest() {
       [`${D}/designs/a.md`]: fm('active', 'design'),
       [`${D}/real.md`]: fm('active', 'design'),
       'code/app.mjs': `// 见 ${D}/real.md 说明\n`,
+    }],
+    ['ok-1b 四反引号围栏内的 ~~~ 不得误关栏', false, 'docs', { sourceRoots: ['.'] }, {
+      'README.md': `# 例\n\n\`\`\`\`md\n~~~\n${D}/ghost.md\n~~~\n\`\`\`\`\n`,
     }],
     // ── 阶段 1:frontmatter 字段表(方案 §4.1 item1)──────────────────────────
     ['ok-全字段齐备', false, 'docs', {}, {
@@ -1071,10 +1178,17 @@ export function selftest() {
       [`${D}/designs/new.md`]: fm('active', 'design', { id: '2026-01-02-新方案', supersedes: '2026-01-01-旧方案' }),
       [`${D}/designs/old.md`]: fm('active', 'design', { id: '2026-01-01-旧方案', supersededBy: '2026-01-02-新方案' }),
     }],
-    ['bad-双权威:同线同 scope 两个 active+authoritative(§12 判据点名)', true, 'docs', {}, {
+    ['bad-双权威:同线同 scope 两个当前态+authoritative(§12 判据点名)', true, 'docs', {}, {
       ...LX,
       [`${D}/designs/a.md`]: fm('active', 'design', { authoritative: 'true' }),
       [`${D}/designs/b.md`]: fm('active', 'design', { authoritative: 'true' }),
+    }],
+    ['bad-自定义 status 双权威仍冲突(status 实例值不得成为豁免开关)', true, 'docs', {
+      status: ['施工中'], deprecatedStatuses: [], authoritativeStatuses: ['施工中'],
+    }, {
+      [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: 施工中'),
+      [`${D}/designs/a.md`]: fm('施工中', 'design', { authoritative: 'true' }),
+      [`${D}/designs/b.md`]: fm('施工中', 'design', { authoritative: 'true' }),
     }],
     ['ok-同线双权威但 authorityScope 细分(缺省=整线,可细分)', false, 'docs', {}, {
       ...LX,
@@ -1086,7 +1200,7 @@ export function selftest() {
       [`${D}/designs/a.md`]: fm('active', 'design', { line: '甲线(K)', authoritative: 'true' }),
       [`${D}/designs/b.md`]: fm('active', 'design', { line: '甲线', authoritative: 'true' }),
     }],
-    ['ok-非 active 的权威声明不占键(唯一性主语是 active+authoritative)', false, 'docs', {}, {
+    ['ok-snapshot 的 authoritative 声明不占当前权威键(authoritativeStatuses 角色真源)', false, 'docs', {}, {
       ...LX,
       [`${D}/designs/a.md`]: fm('active', 'design', { authoritative: 'true' }),
       [`${D}/designs/b.md`]: fm('snapshot', 'design', { authoritative: 'true' }),
@@ -1101,6 +1215,12 @@ export function selftest() {
     }],
     ['ok-归档线墓碑独存(实体自引用不因自身已死而红;关线=改 status 留原地)', false, 'docs', {}, {
       [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: archived'),
+    }],
+    ['bad-自定义 deprecated 线禁止自定义现役文档引用', true, 'docs', {
+      status: ['施工中', '已退役'], deprecatedStatuses: ['已退役'],
+    }, {
+      [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: 已退役'),
+      [`${D}/designs/a.md`]: fm('施工中', 'design'),
     }],
     ['bad-归档件的 supersededBy 悬垂(archive 参与图:扫描域=活区+归档+线)', true, 'docs', {}, {
       ...LX,
@@ -1420,6 +1540,135 @@ export function selftest() {
       console.log(`${pass ? '✓' : '✗'} selftest-docs: 1b 报出的 ref 是真路径而非跨 \`](\` 的拼接串${pass ? '' : `(实得 ${JSON.stringify(refs)})`}`);
       if (!pass) failed++;
     } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+
+  // ── 本轮语义修复精确断言:bad fixture 不得靠无关违规“误通过” ───────────────
+  {
+    const withRepo = (files, run) => {
+      const root = mkdtempSync(join(tmpdir(), 'wk-docs-precision-'));
+      try {
+        for (const [rel, content] of Object.entries(files)) {
+          const abs = join(root, ...rel.split('/'));
+          mkdirSync(dirname(abs), { recursive: true });
+          writeFileSync(abs, content);
+        }
+        return run(root);
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    };
+    const exact = (got, rule) => got.some((v) => v.rule === rule);
+    withRepo({
+      [`${D}/existing/.keep`]: 'x', ...trio(['F-001']),
+      [CO]: closeoutWith([`| F-001 | experience | repo:${D}/existing | — | new | — | yes |`]),
+    }, (root) => {
+      const got = []; checkCloseouts(root, cfg(), (v) => got.push(v));
+      const pass = exact(got, 'closeout.docsMissing');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 目录 target 精确命中 closeout.docsMissing`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      [`${D}/experience.md`]: 'x', ...trio(['F-001']),
+      [CO]: closeoutWith([`| F-001 | experience | repo:${D}/experience.md | — | repo:${D}/ghost.md | — | yes |`]),
+    }, (root) => {
+      const got = []; checkCloseouts(root, cfg(), (v) => got.push(v));
+      const pass = exact(got, 'closeout.dedupInvalid');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 不存在的 dedup 精确命中 closeout.dedupInvalid`);
+      if (!pass) failed++;
+    });
+    // 仓内路径字面合法也不等于真实落点安全：最终项/中间目录 symlink 都不得越仓。
+    {
+      const parent = mkdtempSync(join(tmpdir(), 'wk-docs-symlink-'));
+      const root = join(parent, 'repo'), outside = join(parent, 'outside');
+      try {
+        mkdirSync(outside, { recursive: true });
+        writeFileSync(join(outside, 'secret.md'), 'outside');
+        const files = { ...trio(['F-001']), [CO]: closeoutWith([`| F-001 | experience | repo:${D}/jump/secret.md | — | new | — | yes |`]) };
+        for (const [rel, content] of Object.entries(files)) {
+          const abs = join(root, ...rel.split('/')); mkdirSync(dirname(abs), { recursive: true }); writeFileSync(abs, content);
+        }
+        symlinkSync(outside, join(root, D, 'jump'), process.platform === 'win32' ? 'junction' : 'dir');
+        const got = []; checkCloseouts(root, cfg(), (v) => got.push(v));
+        const pass = exact(got, 'closeout.docsMissing') && readFileSync(join(outside, 'secret.md'), 'utf8') === 'outside';
+        console.log(`${pass ? '✓' : '✗'} selftest-docs: repo target 中间 symlink 越仓被拒且仓外哨兵不动`);
+        if (!pass) failed++;
+      } finally { rmSync(parent, { recursive: true, force: true }); }
+    }
+    withRepo({
+      ...trio(['F-001']),
+      [CO]: closeoutWith(['| F-001 | no-promotion | — | — | — | TODO | yes |']),
+    }, (root) => {
+      const got = []; checkCloseouts(root, cfg({ dispositions: DEFAULTS.dispositions.map((d) => d.name === 'no-promotion' ? { ...d, reasonRequired: false } : d) }), (v) => got.push(v));
+      const pass = exact(got, 'closeout.noPromoReason');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: none 的占位理由精确命中 closeout.noPromoReason(reasonRequired=false 亦然)`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      ...LX,
+      [`${D}/designs/a.md`]: fm('active', 'design') + '\n[x](./gone.md "标题内可含 ) 字符")\n',
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = exact(got, 'docs.brokenLink');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 可选 title(含右括号)断链精确命中 docs.brokenLink`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      ...LX,
+      [`${D}/designs/a.md`]: fm('active', 'design') + "\n[x](./what's-new.md)\n",
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = got.some((v) => v.rule === 'docs.brokenLink' && v.params.target === "./what's-new.md");
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: destination 内单引号不再被误当 title 起点`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      ...LX,
+      [`${D}/designs/foo(bar).md`]: fm('active', 'design'),
+      [`${D}/designs/a.md`]: fm('active', 'design') + '\n[x](./foo\\(bar\\).md)\n',
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = !got.some((v) => v.rule === 'docs.brokenLink');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: destination 的 CommonMark 反斜杠转义在验存前还原`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      ...LX,
+      [`${D}/designs/foo#bar.md`]: fm('active', 'design'),
+      [`${D}/designs/a.md`]: fm('active', 'design') + '\n[x](./foo\\#bar.md)\n',
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = !got.some((v) => v.rule === 'docs.brokenLink');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 转义 # 属 destination 文件名而非 fragment`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: 施工中'),
+      [`${D}/designs/a.md`]: fm('施工中', 'design', { authoritative: 'true' }),
+      [`${D}/designs/b.md`]: fm('施工中', 'design', { authoritative: 'true' }),
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ status: ['施工中'], deprecatedStatuses: [], authoritativeStatuses: ['施工中'], sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = exact(got, 'docs.authorityDuplicate');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 自定义 status 双权威精确命中 docs.authorityDuplicate`);
+      if (!pass) failed++;
+    });
+
+    withRepo({
+      [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: 施工中'),
+      [`${D}/designs/a.md`]: fm('施工中', 'design', { id: '2026-01-01-a', supersededBy: '2026-01-01-b' }),
+      [`${D}/designs/b.md`]: fm('施工中', 'design', { id: '2026-01-01-b', supersedes: '2026-01-01-a' }),
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ status: ['施工中'], deprecatedStatuses: [], authoritativeStatuses: ['施工中'], sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = exact(got, 'docs.supersededButAlive');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 自定义当前态 + supersededBy 精确命中 docs.supersededButAlive`);
+      if (!pass) failed++;
+    });
+    withRepo({
+      [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: 已退役'),
+      [`${D}/designs/a.md`]: fm('施工中', 'design'),
+    }, (root) => {
+      const got = []; checkDocsAndLinks(root, cfg({ status: ['施工中', '已退役'], deprecatedStatuses: ['已退役'], sourceRoots: [] }), (v) => got.push(v), false);
+      const pass = exact(got, 'docs.lineArchivedRef');
+      console.log(`${pass ? '✓' : '✗'} selftest-docs: 自定义 deprecated 线引用精确命中 docs.lineArchivedRef`);
+      if (!pass) failed++;
+    });
   }
 
   for (const [name, expectBad, which, over, files] of cases) {

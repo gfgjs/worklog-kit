@@ -36,15 +36,17 @@ jobs:
           node bin/worklog.mjs index check
       - name: 同 run 两次生成,字节一致
         run: |
+          hash_tree() { (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum); }
           node bin/worklog.mjs index build
           rm -rf "$RUNNER_TEMP/gen-1"
           mv .worklog/generated "$RUNNER_TEMP/gen-1"
           node bin/worklog.mjs index build
-          diff <(cd "$RUNNER_TEMP/gen-1" && sha256sum *) <(cd .worklog/generated && sha256sum *)
+          diff <(hash_tree "$RUNNER_TEMP/gen-1") <(hash_tree .worklog/generated)
       - name: hash 摘要(跨 run 比对用)
         run: |
-          { echo '```'; sha256sum .worklog/generated/*; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          sha256sum .worklog/generated/*
+          hash_tree() { (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum); }
+          { echo '```'; hash_tree .worklog/generated; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          hash_tree .worklog/generated
       - uses: actions/upload-artifact@v4
         with:
           name: generated-index-${{ github.sha }}-run${{ github.run_attempt }}

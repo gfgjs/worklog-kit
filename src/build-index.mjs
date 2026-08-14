@@ -13,7 +13,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { PKG_ROOT, walk, relPath } from './lib/fsutil.mjs';
-import { DEFAULTS, generatedOutDir } from './lib/config.mjs';
+import { DEFAULTS, generatedOutDir, isCurrentAuthority } from './lib/config.mjs';
 import { classifyFile, collectGraphDocs, titleOf, h1Of, LINES_DIR, TRIO } from './lib/docmeta.mjs';
 import { teamDeclOf, EVENT_FILE_RE } from './check-docs.mjs';
 import { slugify, cmpCodePoints } from './lib/slug.mjs';
@@ -144,7 +144,9 @@ export function buildArtifacts(root, config) {
   for (const slug of [...lines.keys()].sort(cmpCodePoints)) {
     const L = lines.get(slug);
     const auth = L.docs
-      .filter((g) => g.data.status === 'active' && g.data.authoritative === 'true')
+      // 当前性由 authoritativeStatuses 显式建模；与图门共用函数，历史 snapshot 不冒充
+      // 当前答案，自定义 status 也无需依赖 active 字面量。
+      .filter((g) => isCurrentAuthority(config, g.data))
       .map((g) => g.data.id ?? g.rel).sort(cmpCodePoints);
     const latest = L.docs.map((g) => g.data.created ?? '').filter(Boolean).sort(cmpCodePoints).at(-1);
     status.push(
@@ -344,6 +346,18 @@ export function selftest() {
     // 覆盖自己的旧产物:合法(marker 在)
     const w2 = writeArtifacts(root, cfg, buildArtifacts(root, cfg));
     assert(!w2.error, '带 marker 的旧产物可被覆盖(正常重建)');
+  });
+
+  // status 枚举是实例可配的，权威汇总不得把 active 当隐形角色映射。
+  withRepo({
+    [`${D}/lines/x.md`]: lineEnt('x').replace('status: active', 'status: 施工中'),
+    [`${D}/designs/custom.md`]: fm({ id: '2026-01-06-自定义权威', status: '施工中', type: 'design', line: 'x', created: '2026-01-06', authoritative: 'true' }),
+    [`${D}/designs/history.md`]: fm({ id: '2026-01-05-历史权威', status: '快照', type: 'design', line: 'x', created: '2026-01-05', authoritative: 'true' }),
+  }, (root) => {
+    const c2 = { ...cfg, status: ['施工中', '快照'], deprecatedStatuses: [], authoritativeStatuses: ['施工中'] };
+    const st = buildArtifacts(root, c2)['STATUS.md'];
+    assert(st.includes('- 权威:2026-01-06-自定义权威'), 'STATUS 汇总包含自定义 status 的 authoritative:true 文档');
+    assert(!st.includes('2026-01-05-历史权威'), 'STATUS 不把非当前 status 的 authoritative:true 历史文档列为权威');
   });
 
   // 排序契约负例:同日两 id,码点序要求 U+FFFD 行在 U+1F600 行之前(UTF-16 `<` 会排反)

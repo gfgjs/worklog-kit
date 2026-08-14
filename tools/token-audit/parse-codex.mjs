@@ -16,19 +16,28 @@ export function parseCodexSession(objs, inWindow, matchCwd) {
   const events = [];
   const pending = new Map();
   let matched = false;
-  let lastTotals = null;
+  let beforeWindowTotals = null;
+  let lastWindowTotals = null;
+  let windowStarted = false;
   let seq = 0;
   for (const o of objs) {
-    if (!inWindow(o.timestamp)) continue;
     const p = o.payload;
     if (!p) continue;
+    // session_meta 通常是会话首行；会话跨窗时它位于 since 之前，仍必须先用 cwd 判归属。
     if (o.type === 'session_meta' && p.cwd) {
       if (!matchCwd(p.cwd)) return { matched: false, events: [] };
       matched = true;
     }
+    const inside = inWindow(o.timestamp);
+    // cumulative token_count 的窗内口径 = 窗内最后总量 - 入窗前最后总量。只保留
+    // 首个窗内事件之前的 baseline，窗后事件不得倒灌覆盖它。
+    if (o.type === 'event_msg' && p.type === 'token_count' && p.info?.total_token_usage) {
+      if (inside) lastWindowTotals = p.info.total_token_usage;
+      else if (!windowStarted) beforeWindowTotals = p.info.total_token_usage;
+    }
+    if (!inside) continue;
+    windowStarted = true;
     if (!matched) continue;
-    if (o.type === 'event_msg' && p.type === 'token_count' && p.info?.total_token_usage)
-      lastTotals = p.info.total_token_usage;
     if (o.type !== 'response_item') continue;
     if (p.type === 'function_call') {
       seq++;
@@ -55,8 +64,9 @@ export function parseCodexSession(objs, inWindow, matchCwd) {
       else if (pd.cat === 'cli') events.push({ t: 'cli', sub: pd.sub, tokens, count: true });
     }
   }
-  if (matched && lastTotals) {
-    events.push({ t: 'usage', out: lastTotals.output_tokens || 0, inn: lastTotals.input_tokens || 0 });
+  if (matched && lastWindowTotals) {
+    const delta = (key) => Math.max(0, (lastWindowTotals[key] || 0) - (beforeWindowTotals?.[key] || 0));
+    events.push({ t: 'usage', out: delta('output_tokens'), inn: delta('input_tokens') });
   }
   return { matched, events };
 }

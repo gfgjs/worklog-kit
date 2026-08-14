@@ -20,7 +20,7 @@
 //
 // 用法:node tools/sync-public.mjs [--apply] [--push] [--selftest] [--offline]
 //                                  [--public <path>] [--message <msg>] [--init-allowlist]
-//                                  [--scan-only [路径]]
+//                                  [--scan-only [路径]] [--fs-selftest]
 //   无参 = dry-run:导出+净化+终检+临时克隆预览 diff 后整体丢弃,公仓零接触。
 //   --init-allowlist = 从当前导出树(剔除排除表后)生成初版 allowlist 并退出,人工 review 后入库。
 //   --scan-only [路径] = 只跑终检扫描(词表/control bytes/邮箱/用户目录路径),直接扫**私仓
@@ -31,10 +31,10 @@
 import { execFileSync } from 'node:child_process';
 import {
   cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync,
-  statSync, writeFileSync,
+  lstatSync, realpathSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const privateRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -47,6 +47,7 @@ const opt = (name, dflt) => {
 const APPLY = flag('--apply');
 const PUSH = flag('--push');
 const SELFTEST = flag('--selftest');
+const FS_SELFTEST = flag('--fs-selftest');
 const OFFLINE = flag('--offline');
 const INIT_ALLOWLIST = flag('--init-allowlist');
 const SCAN_ONLY = flag('--scan-only');
@@ -81,16 +82,23 @@ function resolveTar() {
     + '装 Git for Windows 即带 usr/bin/tar.exe,或从 Git Bash 跑本脚本。');
 }
 
+// 纯文件系统回归不读取真实词表、不要求 clean tree/公仓；因此必须先于所有运行态硬门。
+let TOKENS = [];
+let EXCLUDE = [];
+let ALLOW_EMAILS = new Set();
+let ALLOW_PATTERNS = [];
+if (FS_SELFTEST) process.exit(fsSafetySelftest());
+
 // ── 0. 词表硬门:没有本地词表就不许跑——防「忘了终检」的裸同步 ─────────────
 const blocklistPath = join(privateRoot, '.sync-blocklist.local.json');
 if (!existsSync(blocklistPath)) {
   die(`缺 ${blocklistPath}(gitignored 本地词表)。首次使用照 docs/runbooks/sync-public.md 建立;丢失则从私史 no-leak commits 重提取。`);
 }
 const bl = JSON.parse(readFileSync(blocklistPath, 'utf8'));
-const TOKENS = bl.tokens ?? [];
-const EXCLUDE = bl.excludePaths ?? [];
-const ALLOW_EMAILS = new Set(bl.allowEmails ?? []);
-const ALLOW_PATTERNS = bl.allowPatterns ?? [];
+TOKENS = bl.tokens ?? [];
+EXCLUDE = bl.excludePaths ?? [];
+ALLOW_EMAILS = new Set(bl.allowEmails ?? []);
+ALLOW_PATTERNS = bl.allowPatterns ?? [];
 if (TOKENS.length === 0) die('词表 tokens 为空——不可能是对的,拒跑。');
 
 // ── --scan-only:独立诊断,不接触公仓/allowlist/pack,直扫**活工作树**(含未 commit
@@ -99,6 +107,11 @@ if (SCAN_ONLY) {
   const targetArg = args.find((a) => !a.startsWith('--'));
   const target = targetArg ? resolve(privateRoot, targetArg) : privateRoot;
   if (!existsSync(target)) die(`扫描目标不存在:${target}`);
+  const privateReal = realpathSync(privateRoot);
+  const targetReal = realpathSync(target);
+  const targetStat = lstatSync(target);
+  if (targetStat.isSymbolicLink() || !targetStat.isDirectory() || !isWithin(privateReal, targetReal))
+    die('扫描目标须是私仓内的真实目录,不可经 symlink、普通文件或绝对路径越界。');
   // 词表本地文件自身逐字含全部真实值(它就是词表存放处),扫它是自触发噪声,须跳过;
   // EXCLUDE 里的身份勾连件本就永不导出,同样跳过(诊断价值 = 提醒真会外泄的东西)。
   const skip = new Set(['.git', 'node_modules', basename(blocklistPath)]);
@@ -178,22 +191,66 @@ if (!ok) process.exit(1);
  *  excludeRel:身份勾连件永不导出(runbook 纪律 5)——这些路径本就在 EXCLUDE 减法里,
  *  导出树/tgz 早已不含它们;scan-only 直扫工作树时若不同样跳过,会对「反正不会发布
  *  的私有文档」逐次误报,拿掉这条就失去「只提醒真会外泄的东西」这个诊断价值。 */
+function isWithin(root, candidate) {
+  const rel = relative(root, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+/** 只删除 root 内目标。最终项若是 symlink 只 unlink 链接本身；任一中间段是 symlink
+ *  就拒绝，避免 `root/link/child` 实际落到树外。 */
+function safeRemove(rootDir, rel) {
+  const rootAbs = resolve(rootDir);
+  const rootReal = realpathSync(rootAbs);
+  const abs = resolve(rootAbs, rel);
+  if (abs === rootAbs || !isWithin(rootAbs, abs)) throw new Error('拒绝越出导出树或删除导出树根。');
+  const parts = relative(rootAbs, abs).split(sep).filter(Boolean);
+  let cur = rootAbs;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cur = join(cur, parts[i]);
+    let st; try { st = lstatSync(cur); } catch { return false; }
+    if (st.isSymbolicLink()) throw new Error('拒绝经中间 symlink 删除（可能越出导出树）。');
+    if (!st.isDirectory() || !isWithin(rootReal, realpathSync(cur)))
+      throw new Error('拒绝经非目录或越界目录删除。');
+  }
+  let st; try { st = lstatSync(abs); } catch { return false; }
+  if (st.isSymbolicLink()) rmSync(abs, { force: true });
+  else {
+    if (!isWithin(rootReal, realpathSync(abs))) throw new Error('拒绝删除真实路径越出导出树的目标。');
+    rmSync(abs, { recursive: st.isDirectory(), force: true });
+  }
+  return true;
+}
+
 function scanTree(rootDir, label, skipDirs = new Set(), excludeRel = []) {
   const EMAIL_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
   const HOMEPATH_RE = /[A-Za-z]:[\\/]Users[\\/][^\s"'`)\]]+|\/(?:home|Users)\/[A-Za-z0-9._-]+/g;
   const allowed = (hit) => ALLOW_PATTERNS.some((p) => hit.includes(p));
   const files = [];
+  const violations = [];
+  const rootReal = realpathSync(rootDir);
+  const seen = new Set();
   (function walk(dir) {
-    for (const name of readdirSync(dir)) {
+    const dirReal = realpathSync(dir);
+    if (!isWithin(rootReal, dirReal)) { violations.push('(目录): realpath 越出扫描根'); return; }
+    if (seen.has(dirReal)) return;
+    seen.add(dirReal);
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      const name = ent.name;
       if (skipDirs.has(name)) continue;
       const abs = join(dir, name);
       const rel0 = abs.slice(rootDir.length + 1).replaceAll(sep, '/');
       if (excludeRel.some((e) => rel0 === e || rel0.startsWith(`${e}/`))) continue;
-      if (statSync(abs).isDirectory()) walk(abs);
-      else files.push(abs);
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) {
+        violations.push(`${rel0}: symbolic link（拒绝跟随，避免循环/越界读）`);
+        continue;
+      }
+      const real = realpathSync(abs);
+      if (!isWithin(rootReal, real)) { violations.push(`${rel0}: realpath 越出扫描根`); continue; }
+      if (st.isDirectory()) walk(abs);
+      else if (st.isFile()) files.push(abs);
     }
   })(rootDir);
-  const violations = [];
   for (const abs of files) {
     const rel = abs.slice(rootDir.length + 1).replaceAll(sep, '/');
     const buf = readFileSync(abs);
@@ -209,6 +266,36 @@ function scanTree(rootDir, label, skipDirs = new Set(), excludeRel = []) {
       if (!allowed(m[0])) violations.push(`${rel}: 用户目录路径命中(长 ${m[0].length};真实值本地 grep 该文件)`);
   }
   return { files: files.length, violations, label };
+}
+
+function fsSafetySelftest() {
+  const root = mkdtempSync(join(tmpdir(), 'wk-sync-fs-'));
+  const tree = join(root, 'tree');
+  const outside = join(root, 'outside');
+  let failed = 0;
+  const assert = (cond, name) => { console.log(`${cond ? '✓' : '✗'} sync-public-fs: ${name}`); if (!cond) failed++; };
+  try {
+    mkdirSync(join(tree, 'inside'), { recursive: true });
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(tree, 'inside', 'ok.txt'), 'ok');
+    writeFileSync(join(outside, 'keep.txt'), 'keep');
+    symlinkSync(outside, join(tree, 'jump'), process.platform === 'win32' ? 'junction' : 'dir');
+    const scan = scanTree(tree, 'selftest');
+    assert(scan.files === 1 && scan.violations.some((v) => v.includes('symbolic link')),
+      'walker 不跟随 symlink，树外文件不计入扫描且明确拒绝');
+    let rejected = false;
+    try { safeRemove(tree, join('jump', 'keep.txt')); } catch { rejected = true; }
+    assert(rejected && existsSync(join(outside, 'keep.txt')), '删除路径含中间 symlink 时拒绝且树外文件保留');
+    assert(safeRemove(tree, 'jump') && !existsSync(join(tree, 'jump')) && existsSync(join(outside, 'keep.txt')),
+      '最终项 symlink 只删除链接本身，不删除链接目标');
+    let escaped = false;
+    try { safeRemove(tree, join('..', 'outside')); } catch { escaped = true; }
+    assert(escaped && existsSync(outside), '`..` 越界删除被 containment 拒绝');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+  console.log(failed ? `\n✗ sync-public-fs selftest 失败 ${failed} 项` : '\n✓ sync-public-fs selftest 全部通过');
+  return failed ? 1 : 0;
 }
 
 function runSync(work) {
@@ -229,14 +316,22 @@ function runSync(work) {
     const abs = resolve(exportDir, rel);
     // R7-03 脱敏(复审 P1-05):excludePaths 是本地私有路径,不原文入日志(终端/CI 记录再泄一次)。
     // 只报序号+长度,操作者对照本地词表定位。
-    if (!abs.startsWith(exportDir + sep)) { console.error(`[sync-public] 中止:excludePaths 第 ${i + 1}/${EXCLUDE.length} 条越出导出树(长 ${rel.length};见本地词表)`); return false; }
-    if (existsSync(abs)) { rmSync(abs, { recursive: true, force: true }); console.log(`[排除] 第 ${i + 1}/${EXCLUDE.length} 条(长 ${rel.length})`); }
+    if (!isWithin(exportDir, abs) || abs === exportDir) { console.error(`[sync-public] 中止:excludePaths 第 ${i + 1}/${EXCLUDE.length} 条越出导出树(长 ${rel.length};见本地词表)`); return false; }
+    try {
+      if (safeRemove(exportDir, rel)) console.log(`[排除] 第 ${i + 1}/${EXCLUDE.length} 条(长 ${rel.length})`);
+    } catch {
+      console.error(`[sync-public] 中止:excludePaths 第 ${i + 1}/${EXCLUDE.length} 条含不安全 symlink/真实路径(长 ${rel.length};见本地词表)`);
+      return false;
+    }
   }
 
   // ── 2b. --init-allowlist:从净化后导出树生成初版清单(顶层粒度),review 后入库 ──
   if (INIT_ALLOWLIST) {
-    const entries = readdirSync(exportDir).sort()
-      .map((n) => (statSync(join(exportDir, n)).isDirectory() ? `${n}/` : n));
+    const entries = readdirSync(exportDir).sort().map((n) => {
+      const st = lstatSync(join(exportDir, n));
+      if (st.isSymbolicLink()) throw new Error('--init-allowlist 导出树含 symbolic link；拒绝生成会误放行的清单。');
+      return st.isDirectory() ? `${n}/` : n;
+    });
     writeFileSync(allowlistPath, `${JSON.stringify({
       _note: '公开面 allowlist(默认拒发):不在此清单的路径不会同步到公仓。dir/=整树,file=单文件。加行须 review——这是公开面的唯一声明点。',
       allow: entries,
@@ -250,18 +345,27 @@ function runSync(work) {
   //        顶层聚合计数,不落全路径)──
   {
     const denied = [];
+    const rootReal = realpathSync(exportDir);
+    const seen = new Set();
     (function walk(dir) {
+      const dirReal = realpathSync(dir);
+      if (!isWithin(rootReal, dirReal)) throw new Error('allowlist walker realpath 越出导出树。');
+      if (seen.has(dirReal)) return;
+      seen.add(dirReal);
       for (const name of readdirSync(dir)) {
         const abs = join(dir, name);
         const rel = abs.slice(exportDir.length + 1).replaceAll(sep, '/');
-        const isDir = statSync(abs).isDirectory();
-        if (isAllowed(isDir ? `${rel}/` : rel) || (isDir && ALLOW.some((e) => e.startsWith(`${rel}/`)))) {
+        const st = lstatSync(abs);
+        const isDir = st.isDirectory();
+        const allowed = isAllowed(isDir ? `${rel}/` : rel) || (isDir && ALLOW.some((e) => e.startsWith(`${rel}/`)));
+        if (st.isSymbolicLink() && allowed) throw new Error('导出树含 allowlist 放行的 symbolic link；拒绝公开以免越界/循环。');
+        if (allowed) {
           // 目录整体允许,或其内部有更深的允许条目 ⇒ 继续下钻;文件允许 ⇒ 留
           if (isDir) walk(abs);
           continue;
         }
         denied.push(rel.split('/')[0]);
-        rmSync(abs, { recursive: true, force: true });
+        safeRemove(exportDir, rel);
       }
     })(exportDir);
     if (denied.length) {

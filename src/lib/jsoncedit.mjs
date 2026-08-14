@@ -1,9 +1,10 @@
 // jsoncedit:JSONC 文本的外科编辑(F-005)。
 //
 // 目标:改值不重排——注释、空白、键序、行风格原样保留。迁移的全部配置改动可归约为
-// 两个原语(见 upgrade.mjs 各迁移):
+// 三个原语(见 upgrade.mjs 各迁移):
 //   replaceValue(src, path, value)  按路径替换既有值
 //   appendItem(src, path, value)    向数组尾部追加一项
+//   appendProperty(src, path, key, value) 向对象尾部追加一个不存在的键
 //
 // 安全模型:本模块只管「改得漂亮」;「改得正确」由调用方兜底——upgrade 的 configChange
 // 对编辑产物做**解析等价断言**(与语义计算出的对象全等),不过即回落 JSON.stringify。
@@ -176,14 +177,56 @@ export function appendItem(src, path, value) {
 }
 
 /**
+ * 向对象尾部追加属性。用于 schema 升版给历史对象补新必填槽位；若键已存在则拒绝，
+ * 避免生成重复键再让 JSON.parse 静默以后者覆盖前者。多行对象沿用最后属性缩进，
+ * 单行对象使用 `, "key": value`，尾随逗号处理与 appendItem 同构。
+ */
+export function appendProperty(src, path, key, value) {
+  const node = resolve(src, path);
+  if (!node) throw new Error(`路径不存在:${path.join('.')}`);
+  if (node.kind !== 'object') throw new Error(`路径不是对象:${path.join('.')}`);
+  if (node.entries.some((e) => e.key === key)) throw new Error(`属性已存在:${[...path, key].join('.')}`);
+  const text = `${JSON.stringify(key)}: ${inlineStringify(value)}`;
+  if (node.entries.length === 0) {
+    return `${src.slice(0, node.start + 1)}${text}${src.slice(node.start + 1)}`;
+  }
+  const last = node.entries[node.entries.length - 1].node;
+  const multiline = src.slice(node.start, last.end).includes('\n');
+  const after = skipTrivia(src, last.end);
+  const hasTrailingComma = src[after] === ',';
+  if (multiline) {
+    const lineStart = src.lastIndexOf('\n', last.start) + 1;
+    const indent = /^[ \t]*/.exec(src.slice(lineStart, last.start))[0];
+    const eol = src.includes('\r\n') ? '\r\n' : '\n';
+    const close = node.end - 1;
+    const closeLineStart = src.lastIndexOf('\n', close - 1) + 1;
+    const closePrefix = src.slice(closeLineStart, close);
+    const closeOnOwnLine = /^[ \t]*$/.test(closePrefix);
+    const split = closeOnOwnLine ? closeLineStart : close;
+    // 既有行尾/块注释留在旧属性之后；新属性插到闭括号前。否则直接在 value.end
+    // 插入会把 `// old` 搬到新属性行，虽然能解析却改变注释归属。
+    const leadEnd = hasTrailingComma ? after + 1 : last.end;
+    let middle = src.slice(leadEnd, split);
+    if (!/(?:\r\n|\n)$/.test(middle)) middle += eol;
+    const lead = hasTrailingComma ? src.slice(0, leadEnd) : `${src.slice(0, leadEnd)},`;
+    return `${lead}${middle}${indent}${text}${hasTrailingComma ? ',' : ''}${eol}${closeOnOwnLine ? closePrefix : ''}${src.slice(close)}`;
+  }
+  return hasTrailingComma
+    ? `${src.slice(0, after + 1)} ${text},${src.slice(after + 1)}`
+    : `${src.slice(0, last.end)}, ${text}${src.slice(last.end)}`;
+}
+
+/**
  * 顺序应用一组编辑,每步之后重新解析(span 在编辑后即失效,不做增量维护——
  * 配置量级下重解析开销可忽略,换来的是无悬垂偏移这类整类 bug)。
  * @param {string} src
- * @param {{op?: 'replace'|'append', path: (string|number)[], value: any}[]} edits
+ * @param {{op?: 'replace'|'append'|'append-property', path: (string|number)[], key?: string, value: any}[]} edits
  */
 export function applyEdits(src, edits) {
   for (const e of edits) {
-    src = e.op === 'append' ? appendItem(src, e.path, e.value) : replaceValue(src, e.path, e.value);
+    src = e.op === 'append' ? appendItem(src, e.path, e.value)
+      : e.op === 'append-property' ? appendProperty(src, e.path, e.key, e.value)
+        : replaceValue(src, e.path, e.value);
   }
   return src;
 }
@@ -277,6 +320,21 @@ export function selftest() {
   {
     assert(inlineStringify({ name: 'line', canBeAuthoritative: false }) === `{ "name": "line", "canBeAuthoritative": false }`, 'inlineStringify 对象内联带空格');
     assert(inlineStringify(['a', 1, null]) === `["a", 1, null]`, 'inlineStringify 数组内联');
+  }
+  // 13. 对象补属性:迁移新增必填槽位时仍保留对象内注释/行构
+  {
+    const src = `{\n  "items": [\n    { "name": "x", "kind": "none" }, // keep\n    {\n      "name": "y",\n      "kind": "none" // belongs to kind\n    }\n  ], // items comment stays here\n  "tail": true // tail comment stays here\n}`;
+    let out = appendProperty(src, ['items', 0], 'required', true);
+    out = appendProperty(out, ['items', 1], 'required', true);
+    out = appendProperty(out, [], 'rootRequired', true);
+    assert(out.includes(`{ "name": "x", "kind": "none", "required": true }, // keep`), '单行对象补属性保尾注');
+    assert(out.includes(`"kind": "none", // belongs to kind\n      "required": true`), '多行对象补属性沿用缩进且不挪旧属性尾注');
+    assert(out.includes(`"tail": true, // tail comment stays here\n  "rootRequired": true`), '根对象补属性不挪末属性尾注');
+    const parsed = JSON.parse(out.replace(/\/\/[^\n]*/g, ''));
+    assert(parsed.rootRequired === true && parsed.items.every((x) => x.required === true), '对象补属性产物语义正确');
+    const sameLineClose = appendProperty(`{\n  "a": 1 }`, [], 'b', 2);
+    assert((sameLineClose.match(/"a"/g) || []).length === 1 && JSON.parse(sameLineClose).b === 2,
+      '多行对象闭括号与末属性同排时不复制末属性');
   }
 
   if (failed) { console.error(`✗ jsoncedit selftest:${failed} 项失败`); return 1; }

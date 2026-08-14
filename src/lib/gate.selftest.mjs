@@ -8,7 +8,7 @@ import { partitionViolations, toBaselineEntries, reportViolations, BASELINE_NAME
 import { BASELINE_ELIGIBLE } from './violations.mjs';
 import { DEFAULTS } from './config.mjs';
 import { main as checkDocs } from '../check-docs.mjs';
-import { main as baselineCmd } from '../baseline.mjs';
+import { main as baselineCmd, collectAll, buildBaseline } from '../baseline.mjs';
 import { RC_PROFILE_LINE, RC_DIRS_LINE, CI_PROFILE_PLACEHOLDER, CI_EXTRA_LINE } from '../init.mjs';
 import { PKG_ROOT } from './fsutil.mjs';
 
@@ -169,6 +169,23 @@ export function selftest() {
     const ci = readFileSync(join(PKG_ROOT, 'templates', 'ci-github.yml'), 'utf8');
     assert(ci.includes(CI_PROFILE_PLACEHOLDER), `CI 模板含 ${CI_PROFILE_PLACEHOLDER} 占位符(R2-M4 按 profile 生成的替换点)`);
     assert(ci.includes(CI_EXTRA_LINE), 'CI 模板含按档附加步占位行(brownfield 的 baseline 报告步由此注入)');
+  }
+
+  // ── 7. baseline 的“全量”口径含 team/任务名图门 ──────────────────────────
+  // 它们不可豁免、不会进 entries，但必须计入 total/skipped，报告才不会把真实红漏掉。
+  {
+    const root = mkdtempSync(join(tmpdir(), 'wk-baseline-team-'));
+    try {
+      const write = (rel, s) => { const p = join(root, ...rel.split('/')); mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, s); };
+      write('docs/planning/2026-01-01-同名/task_plan.md', '# p\n');
+      write('docs/worklogs/2026-02-02-同名/task_plan.md', '# p\n');
+      const config = { ...DEFAULTS, docsDir: 'docs', sourceRoots: [], profile: 'brownfield' };
+      const all = collectAll(root, config);
+      const dup = all.filter((v) => v.rule === 'team.taskNameDup');
+      const built = buildBaseline(root, config, '2026-01-01');
+      assert(dup.length === 1, 'baseline collectAll 包含 team.taskNameDup(图门虽不可豁免也不漏采)');
+      assert(built.total === all.length && built.skipped >= dup.length, 'baseline total/skipped 计入 team/任务名图违规');
+    } finally { rmSync(root, { recursive: true, force: true }); }
   }
 
   console.log(failed ? `\n✗ gate selftest 失败 ${failed} 项` : '\n✓ gate selftest 全部通过');

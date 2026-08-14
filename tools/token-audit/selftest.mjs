@@ -111,6 +111,20 @@ export function selftest() {
     assert(miss.matched === false && miss.events.length === 0, '非目标 cwd 整会话跳过');
   }
 
+  // ── Codex 跨窗：session_meta 在 since 前，token_count 按 cumulative delta ──
+  {
+    const { objs, bad } = parseJsonl(readFileSync(join(HERE, 'fixtures', 'codex-cross-window.jsonl'), 'utf8'));
+    const match = (cwd) => mungedTail(cwd) === mungedTail('C:\\workspace\\golden-proj');
+    const { matched, events } = parseCodexSession(objs, makeWindow('2026-07-19', '2026-07-19'), match);
+    const agg = newAgg();
+    agg.sessions++;
+    foldSession(agg, events);
+    assert(bad === 0 && matched, '跨窗 session_meta 虽在 since 前仍正确匹配项目');
+    assert(agg.cli.check?.n === 1, '跨窗会话的窗内 CLI 事件被保留');
+    assert(agg.realIn === 250 && agg.realOut === 30,
+      '窗内 usage = cumulative 末值 - 入窗 baseline（窗后 cumulative 不倒灌）');
+  }
+
   console.log(failed ? `\n✗ token-audit selftest 失败 ${failed} 项` : '\n✓ token-audit selftest 全部通过');
   return failed ? 1 : 0;
 }

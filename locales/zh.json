@@ -41,7 +41,7 @@
   "docs.supersedesUnpaired": "{field}: {ref} 未获对方回指——取代关系须成对且双向一致,{other} 须声明 {backField}: {self}",
   "docs.supersededNoRef": "status: superseded 必须携 supersededBy(谁取代了它);接任者机器派生不出,须人填——存量仓可 baseline 立账",
   "docs.supersededButAlive": "已声明 supersededBy 却仍为 status: {status}——被取代与现役互斥;请改 status(superseded/snapshot)或删掉该字段",
-  "docs.authorityDuplicate": "双权威:line「{line}」scope「{scope}」已有 active+authoritative 文档 {other}——每 (line, authorityScope) 至多一个;请降一方为非权威,或细分 authorityScope",
+  "docs.authorityDuplicate": "双权威:line「{line}」scope「{scope}」已有当前态+authoritative 文档 {other}——每 (line, authorityScope) 至多一个;请降一方为非权威、改为非当前 status,或细分 authorityScope",
   "docs.lineArchivedRef": "line「{line}」的实体已是 {status}({entity})——归档线不得再被现役文档引用;请把 line 迁到去向线(见实体内横幅),或将本文档一并归档",
   "docs.pass": "✓ docs 门禁通过({mode};{docs} 个文档,{code} 个代码/配置文件)",
   "docs.fail": "✗ docs 门禁失败:{n} 处强制违反(baseline 豁免挂账不计入本数,另行单列)。移动须同 commit 修链;归档须横幅;活区须状态头。",

@@ -2,9 +2,10 @@
 // R2-C5:配置格式裁 JSONC + JSON Schema。
 // R5-M2:JSON Schema 已成为**运行期真源**——校验由 schema/worklogrc.schema.json 驱动
 // (见 lib/schema.mjs),不再是「编辑器里有提示、运行期不读」的摆设。
-import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, rmSync, realpathSync, statSync, lstatSync, mkdirSync } from 'node:fs';
+import { join, resolve, relative, isAbsolute, dirname, sep } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { PKG_ROOT } from './fsutil.mjs';
 import { validateJsonSchema } from './schema.mjs';
 
@@ -16,8 +17,8 @@ export const CONFIG_NAME = '.worklogrc.jsonc';
  * 新门的同时必须能跑 `worklog-kit upgrade`。不在此列的版本(未来版本)一律拒绝:
  * 用旧引擎解释新布局,得到的是基于错误 schema 的判定。
  */
-export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, 4, 5];
-export const LATEST_SCHEMA_VERSION = 5;
+export const SUPPORTED_SCHEMA_VERSIONS = [1, 2, 3, 4, 5, 6];
+export const LATEST_SCHEMA_VERSION = 6;
 
 /** 采纳档(D-002 四档砍两档;`advisory` 降为 `--warn-only` 标志、`greenfield` 并入 strict) */
 export const PROFILES = ['strict', 'brownfield'];
@@ -53,6 +54,9 @@ export const DEFAULTS = {
   dirs: ['designs', 'reviews', 'decisions', 'runbooks', 'lines', 'planning', 'worklogs', 'archive'],
   status: ['draft', 'active', 'snapshot', 'superseded', 'archived'],
   deprecatedStatuses: ['superseded'],
+  // 哪些 status 表示“当前答案”。权威资格(type)与当前性(status)是两条正交机器信号；
+  // 显式建模后，自定义状态无需冒充 active，历史 snapshot 也不会占当前权威名额。
+  authoritativeStatuses: ['active'],
   types: [
     { name: 'design', canBeAuthoritative: true },
     { name: 'review', canBeAuthoritative: false },
@@ -152,6 +156,45 @@ export function parseJsonc(src) {
 const isSafeRelPath = (p) => !!p && !p.startsWith('/') && !/^[A-Za-z]:/.test(p) && !p.includes('\\')
   && !p.split('/').some((s) => s === '' || s === '.' || s === '..');
 
+const isWithin = (root, p) => {
+  const rel = relative(root, p);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+};
+
+/**
+ * 把机器面相对路径解析为仓内绝对路径,并检查既有路径前缀的 realpath。
+ * 字符串 containment 不足以挡住仓内 symlink 指向仓外；目标尚不存在时也要检查
+ * 最近的既有祖先，供 upgrade 在任何备份/写入前做统一预检。
+ *
+ * @returns {{ok: true, path: string}|{ok: false, reason: string}}
+ */
+export function resolveRepoPath(root, rel, { allowRoot = false, needExist = false, needDirectory = false, needFile = false } = {}) {
+  if (typeof rel !== 'string' || !((allowRoot && rel === '.') || isSafeRelPath(rel))) {
+    return { ok: false, reason: '须为仓内相对路径(只用 /,不得含空段、. 或 ..)' };
+  }
+  try {
+    const rootReal = realpathSync(root);
+    const abs = rel === '.' ? rootReal : resolve(rootReal, ...rel.split('/'));
+    if (!isWithin(rootReal, abs)) return { ok: false, reason: '解析后越出仓根' };
+    if (needExist && !existsSync(abs)) return { ok: false, reason: needDirectory ? '目录不存在' : '路径不存在' };
+    if (needDirectory && (!existsSync(abs) || !statSync(abs).isDirectory())) {
+      return { ok: false, reason: existsSync(abs) ? '不是目录' : '目录不存在' };
+    }
+    // 普通文件语义刻意用 lstat：stat 会跟随最终 symlink，使一个链接可冒充真实知识落点。
+    if (needFile && (!existsSync(abs) || !lstatSync(abs).isFile())) {
+      return { ok: false, reason: existsSync(abs) ? '不是普通文件' : '文件不存在' };
+    }
+
+    let probe = abs;
+    while (!existsSync(probe) && dirname(probe) !== probe) probe = dirname(probe);
+    const real = realpathSync(probe);
+    if (!isWithin(rootReal, real)) return { ok: false, reason: '既有路径或父目录经符号链接指向仓外' };
+    return { ok: true, path: abs };
+  } catch (e) {
+    return { ok: false, reason: `无法确认真实路径:${e.message}` };
+  }
+}
+
 /** 取 type 名字列表(内部形态恒为 v2 对象数组;此助手让调用方不必重复知道这件事) */
 export const typeNames = (config) => config.types.map((x) => x.name);
 
@@ -173,8 +216,19 @@ export function normalizeConfig(parsed) {
     // 保守方向是可修的(用户改配置),反过来则是个安静的错误。
     out.types = out.types.map((name) => ({ name, canBeAuthoritative: BUILTIN_AUTHORITATIVE[name] ?? false }));
   }
+  // v1-v5 没有 current-authority role 槽位。旧引擎只认 status:active，因此迁入内部
+  // 形态时精确保留旧语义：有 active 就是 [active]，没有则为空，绝不猜哪个自定义值等价。
+  if (!Array.isArray(out.authoritativeStatuses)) {
+    out.authoritativeStatuses = Array.isArray(out.status) && out.status.includes('active') ? ['active'] : [];
+  }
   out.schemaVersion = LATEST_SCHEMA_VERSION;
   return out;
+}
+
+/** 文档是否占用“当前权威”名额。门禁与 STATUS 生成器必须共用，避免再次语义分叉。 */
+export function isCurrentAuthority(config, data) {
+  return data?.authoritative === 'true'
+    && (config.authoritativeStatuses || []).includes(data.status);
 }
 
 /**
@@ -183,8 +237,11 @@ export function normalizeConfig(parsed) {
  * 这些不塞进 schema 是因为 draft-07 表达它们要用 if/then 与投影唯一性——
  * schema 会变成一台需要自己的测试的机器,得不偿失。
  */
-function validateSemantics(cfg) {
+function validateSemantics(cfg, root) {
   const errors = [];
+  if (cfg === null || typeof cfg !== 'object' || Array.isArray(cfg)) {
+    return [`配置顶层须为对象(收到:${cfg === null ? 'null' : Array.isArray(cfg) ? 'array' : typeof cfg})`];
+  }
   // schemaVersion:upgrade/migration registry 按它逐级迁移。schema 只断言它是整数;
   // 「这个整数本工具认不认」是版本契约,须在此判——否则未来版本的配置会被当合法
   // 输入喂给旧引擎,得到一个基于错误 schema 的判定。
@@ -193,6 +250,9 @@ function validateSemantics(cfg) {
   }
   if (typeof cfg.docsDir === 'string' && !isSafeRelPath(cfg.docsDir)) {
     errors.push(`docsDir 须为仓内相对路径(收到:${cfg.docsDir})`);
+  } else if (typeof cfg.docsDir === 'string') {
+    const checked = resolveRepoPath(root, cfg.docsDir);
+    if (!checked.ok) errors.push(`docsDir 须真实解析在仓内(收到:${cfg.docsDir};${checked.reason})`);
   }
   // R7-05:dirs 驱动 init 写盘(join(root, docsDir, dir) + .gitkeep)与索引门三方一致,
   // 是路径类键里唯一没接 isSafeRelPath 的——`../../x` 曾让 init exit 0 且 .gitkeep 落仓外。
@@ -201,6 +261,22 @@ function validateSemantics(cfg) {
     for (const d of cfg.dirs) {
       if (typeof d !== 'string') continue; // 形状错 schema 已报
       if (!isSafeRelPath(d) || d.includes('/')) errors.push(`dirs 条目须为单段目录名(收到:${d})`);
+      else if (typeof cfg.docsDir === 'string' && isSafeRelPath(cfg.docsDir)) {
+        const checked = resolveRepoPath(root, `${cfg.docsDir}/${d}`);
+        if (!checked.ok) errors.push(`dirs 条目须真实解析在仓内(收到:${d};${checked.reason})`);
+      }
+    }
+  }
+  if (Array.isArray(cfg.sourceRoots)) {
+    for (const sourceRoot of cfg.sourceRoots) {
+      if (typeof sourceRoot !== 'string') continue; // 形状错由 schema 报
+      // 缺失目录仍合法：不少仓会先声明条件生成/后续创建的源码根，walker 对缺失根本就
+      // 安全返回空。存在时才要求目录；无论存在与否，最近既有祖先均须 realpath 留在仓内。
+      const checked = resolveRepoPath(root, sourceRoot, { allowRoot: true });
+      if (!checked.ok) errors.push(`sourceRoots 条目须为仓根内实际目录(收到:${sourceRoot};${checked.reason})`);
+      else if (existsSync(checked.path) && !lstatSync(checked.path).isDirectory()) {
+        errors.push(`sourceRoots 条目存在时须为目录(收到:${sourceRoot};不是目录)`);
+      }
     }
   }
   // R7-06:核心数组空置时 init 照常 exit 0,check/index 门必红——配置合法性须蕴含
@@ -227,6 +303,9 @@ function validateSemantics(cfg) {
     } else if (typeof cfg.docsDir === 'string' && (od === cfg.docsDir || od.startsWith(`${cfg.docsDir}/`))) {
       // 生成物没有合法 frontmatter,放进受治理目录 = build 完当场被自己的门判红
       errors.push(`index.outDir 不得位于 docsDir 之内(收到:${od});生成物不受 frontmatter 治理,建议仓根 .worklog/generated`);
+    } else {
+      const checked = resolveRepoPath(root, od);
+      if (!checked.ok) errors.push(`index.outDir 须真实解析在仓内(收到:${od};${checked.reason})`);
     }
   }
   if (Array.isArray(cfg.dispositions)) {
@@ -240,15 +319,40 @@ function validateSemantics(cfg) {
       if (d.targetKind === 'fixed') {
         if (typeof d.target !== 'string') errors.push(`disposition ${d.name}(fixed)缺 target`);
         else if (!isSafeRelPath(d.target)) errors.push(`disposition ${d.name} 的 target 须为仓内相对路径(收到:${d.target})`);
+        else {
+          const checked = resolveRepoPath(root, d.target);
+          if (!checked.ok) errors.push(`disposition ${d.name} 的 target 须真实解析在仓内(收到:${d.target};${checked.reason})`);
+        }
       } else if (d.target !== undefined) {
         errors.push(`disposition ${d.name}(targetKind=${d.targetKind})不应有 target——它不会被读,是死配置`);
       }
       if (d.targetKind === 'line-status') {
         if (typeof d.statusDir !== 'string') errors.push(`disposition ${d.name}(line-status)缺 statusDir`);
         else if (!isSafeRelPath(d.statusDir)) errors.push(`disposition ${d.name} 的 statusDir 须为仓内相对路径(收到:${d.statusDir})`);
+        else {
+          const checked = resolveRepoPath(root, d.statusDir);
+          if (!checked.ok) errors.push(`disposition ${d.name} 的 statusDir 须真实解析在仓内(收到:${d.statusDir};${checked.reason})`);
+        }
       } else if (d.statusDir !== undefined) {
         errors.push(`disposition ${d.name}(targetKind=${d.targetKind})不应有 statusDir——它不会被读,是死配置`);
       }
+      // v6 才把 none⇒reasonRequired=true 升为元模型契约。v1-v5 的历史配置允许缺省,
+      // 由 v5→v6 migration 自动补齐；否则 upgrade 的安全预检会把合法旧配置锁死。
+      if (cfg.schemaVersion >= 6 && d.targetKind === 'none' && d.reasonRequired !== true) {
+        errors.push(`disposition ${d.name}(targetKind=none)的 reasonRequired 必须为 true`);
+      }
+    }
+  }
+  if (Array.isArray(cfg.authoritativeStatuses)) {
+    const status = new Set(Array.isArray(cfg.status) ? cfg.status : []);
+    const deprecated = new Set(Array.isArray(cfg.deprecatedStatuses) ? cfg.deprecatedStatuses : []);
+    const seen = new Set();
+    for (const s of cfg.authoritativeStatuses) {
+      if (typeof s !== 'string') continue; // 形状错由 schema 报
+      if (seen.has(s)) errors.push(`authoritativeStatuses 条目不得重复(收到:${s})`);
+      seen.add(s);
+      if (!status.has(s)) errors.push(`authoritativeStatuses 条目须同时存在于 status(收到:${s})`);
+      if (deprecated.has(s)) errors.push(`authoritativeStatuses 不得包含 deprecatedStatuses 的终态值(收到:${s})`);
     }
   }
   return errors;
@@ -276,17 +380,21 @@ export function loadConfig(cwd) {
   } catch (e) {
     return { config: { ...DEFAULTS }, path, errors: [`配置解析失败:${e.message}`], fileVersion: null, raw: null };
   }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { config: { ...DEFAULTS }, path, errors: validateSemantics(parsed, cwd), fileVersion: null, raw: parsed };
+  }
   // 版本先定,才知道拿哪本 schema 去量。版本本身不合法则无从校验其余部分——
   // 拿 v2 的尺子量一份 v1 配置,报出来的会是一串似是而非的假错。
   const v = parsed?.schemaVersion;
-  const versionErrors = validateSemantics(parsed).filter((e) => e.startsWith('schemaVersion'));
+  const semanticErrors = validateSemantics(parsed, cwd);
+  const versionErrors = semanticErrors.filter((e) => e.startsWith('schemaVersion'));
   if (!Number.isInteger(v) || !SUPPORTED_SCHEMA_VERSIONS.includes(v)) {
     const errs = versionErrors.length ? versionErrors : [`schemaVersion 缺失或非整数(收到:${JSON.stringify(v)});须为 ${SUPPORTED_SCHEMA_VERSIONS.join('/')} 之一`];
     return { config: { ...DEFAULTS }, path, errors: errs, fileVersion: null, raw: parsed };
   }
   const errors = [
     ...validateJsonSchema(configSchema(v), parsed, CONFIG_NAME),
-    ...validateSemantics(parsed),
+    ...semanticErrors,
   ];
   return { config: { ...DEFAULTS, ...normalizeConfig(parsed) }, path, errors, fileVersion: v, raw: parsed };
 }
@@ -327,6 +435,7 @@ export function selftest() {
     schemaVersion: 1, docsDir: 'docs', dirs: ['designs'], status: ['active'],
     types: ['design'], dispositions: [{ name: 'experience', targetKind: 'docs' }],
   };
+  const v6base = { ...base, schemaVersion: 6, authoritativeStatuses: ['active'] };
   const cases = [
     ['ok-最小合法配置(v2)', base, false],
     ['ok-最小合法配置(v1;旧版仍可读——梯子先于门)', v1base, false],
@@ -346,6 +455,16 @@ export function selftest() {
     ['bad-profile 非两档之一(D-002)', { ...base, profile: 'advisory' }, true],
     ['bad-targetKind 非法', { ...base, dispositions: [{ name: 'x', targetKind: 'bogus' }] }, true],
     ['bad-disposition 重名', { ...base, dispositions: [{ name: 'x', targetKind: 'docs' }, { name: 'x', targetKind: 'none' }] }, true],
+    ['ok-v2 历史 none 可缺 reasonRequired(由 upgrade 补梯子)', { ...base, dispositions: [{ name: 'x', targetKind: 'none' }] }, false],
+    ['ok-v5 历史 none 可缺 reasonRequired(由 v5→v6 upgrade 补梯子)', { ...base, schemaVersion: 5, dispositions: [{ name: 'x', targetKind: 'none' }] }, false],
+    ['ok-v5 历史 none 可显式 false(由 v5→v6 upgrade 修正)', { ...base, schemaVersion: 5, dispositions: [{ name: 'x', targetKind: 'none', reasonRequired: false }] }, false],
+    ['ok-v5 none 显式 reasonRequired=true', { ...base, schemaVersion: 5, dispositions: [{ name: 'x', targetKind: 'none', reasonRequired: true }] }, false],
+    ['bad-v6 none 缺 reasonRequired=true', { ...v6base, dispositions: [{ name: 'x', targetKind: 'none' }] }, true],
+    ['bad-v6 none 显式 reasonRequired=false', { ...v6base, dispositions: [{ name: 'x', targetKind: 'none', reasonRequired: false }] }, true],
+    ['ok-v6 none 显式 reasonRequired=true', { ...v6base, dispositions: [{ name: 'x', targetKind: 'none', reasonRequired: true }] }, false],
+    ['ok-v6 自定义当前权威状态', { ...v6base, status: ['施工中'], authoritativeStatuses: ['施工中'] }, false],
+    ['bad-v6 当前权威状态不在 status', { ...v6base, authoritativeStatuses: ['施工中'] }, true],
+    ['bad-v6 当前权威状态同时 deprecated', { ...v6base, status: ['active', '旧'], deprecatedStatuses: ['旧'], authoritativeStatuses: ['旧'] }, true],
     ['bad-fixed 缺 target', { ...base, dispositions: [{ name: 'todo', targetKind: 'fixed' }] }, true],
     ['bad-fixed target 越仓', { ...base, dispositions: [{ name: 'todo', targetKind: 'fixed', target: '../evil.md' }] }, true],
     ['bad-line-status 缺 statusDir', { ...base, dispositions: [{ name: 'todo', targetKind: 'line-status' }] }, true],
@@ -384,6 +503,22 @@ export function selftest() {
       if (!pass) failed++;
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+  {
+    const none = (reasonRequired) => ({
+      ...base,
+      schemaVersion: 6,
+      authoritativeStatuses: ['active'],
+      dispositions: [{ name: 'x', targetKind: 'none', ...(reasonRequired === undefined ? {} : { reasonRequired }) }],
+    });
+    assert(validateJsonSchema(configSchema(5), { ...base, schemaVersion: 5, dispositions: [{ name: 'x', targetKind: 'none' }] }, CONFIG_NAME).length === 0,
+      'v5 schema 保持已发布契约，仍接受 none 缺 reasonRequired');
+    assert(validateJsonSchema(configSchema(6), none(undefined), CONFIG_NAME).length > 0,
+      'v6 schema 自身拒绝 none 缺 reasonRequired');
+    assert(validateJsonSchema(configSchema(6), none(false), CONFIG_NAME).length > 0,
+      'v6 schema 自身拒绝 none 的 reasonRequired=false');
+    assert(validateJsonSchema(configSchema(6), none(true), CONFIG_NAME).length === 0,
+      'v6 schema 自身接受 none 的 reasonRequired=true');
+  }
 
   // 3. DEFAULTS ≡ 包内模板配置。init 在**无配置的新仓**里按 DEFAULTS 造目录、同时
   //    stamp 模板配置文件;两者一旦分家,init 会 stamp 出「目录按 DEFAULTS、配置声明
@@ -412,6 +547,42 @@ export function selftest() {
     try {
       writeFileSync(join(root, CONFIG_NAME), '{"a": ');
       assert(loadConfig(root).errors.length > 0, '语法坏的配置报解析失败');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+
+  // 5b. 合法 JSON 但顶层不是对象:受控配置错误,CLI config 必须 exit 2 而非 TypeError 栈崩。
+  {
+    const root = mkdtempSync(join(tmpdir(), 'wk-config-selftest-'));
+    try {
+      writeFileSync(join(root, CONFIG_NAME), 'null\n');
+      const loaded = loadConfig(root);
+      const cli = spawnSync(process.execPath, [join(PKG_ROOT, 'bin', 'worklog.mjs'), 'config'], { cwd: root, encoding: 'utf8' });
+      assert(loaded.errors.some((e) => e.includes('顶层须为对象')), '合法 JSON 顶层 null 返回受控配置错误');
+      assert(cli.status === 2 && !`${cli.stdout}${cli.stderr}`.includes('TypeError'), 'CLI config 对顶层 null exit 2 且不崩栈');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+
+  // 5c. 显式 sourceRoots 是会被递归读取的边界:存在时须为仓内真实目录；缺失目录
+  //     允许预声明（条件生成目录/新仓先配后建），walker 会安全返回空。
+  {
+    const root = mkdtempSync(join(tmpdir(), 'wk-config-selftest-'));
+    try {
+      mkdirSync(join(root, 'code'));
+      writeFileSync(join(root, 'plain.txt'), 'not a dir');
+      const probe = (sourceRoots) => {
+        writeFileSync(join(root, CONFIG_NAME), JSON.stringify({ ...base, sourceRoots }));
+        return loadConfig(root).errors;
+      };
+      assert(probe(['code']).length === 0, 'sourceRoots 接受仓内实际目录');
+      assert(probe(['../']).some((e) => e.includes('sourceRoots')), 'sourceRoots 拒绝 ../ 越仓');
+      assert(probe(['plain.txt']).some((e) => e.includes('不是目录')), 'sourceRoots 拒绝普通文件(不把 ENOTDIR 留给 walker)');
+      assert(probe(['missing']).length === 0, 'sourceRoots 接受尚未创建的仓内目录（walker 安全跳过）');
+      writeFileSync(join(root, CONFIG_NAME), JSON.stringify({ ...base, sourceRoots: ['plain.txt'] }));
+      let cli = spawnSync(process.execPath, [join(PKG_ROOT, 'bin', 'worklog.mjs'), 'config'], { cwd: root, encoding: 'utf8' });
+      assert(cli.status === 2 && !`${cli.stdout}${cli.stderr}`.includes('ENOTDIR'), 'CLI config 对普通文件 sourceRoot 受控 exit 2');
+      writeFileSync(join(root, CONFIG_NAME), JSON.stringify({ ...base, sourceRoots: ['../'] }));
+      cli = spawnSync(process.execPath, [join(PKG_ROOT, 'bin', 'worklog.mjs'), 'config'], { cwd: root, encoding: 'utf8' });
+      assert(cli.status === 2 && !`${cli.stdout}${cli.stderr}`.includes('TypeError'), 'CLI config 对 ../ sourceRoot 受控 exit 2');
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
 

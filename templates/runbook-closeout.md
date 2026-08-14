@@ -51,7 +51,7 @@ created: <YYYY-MM-DD>
 - disposition 不在枚举;docs 类 target 不存在;`repo:` 路径**越出仓根**(`../`、绝对路径);code/test 未用冻结引用;no-promotion 缺 N/A 理由;`verified≠yes`(**no-promotion 也要 yes**)。
 - 归档件缺文首状态横幅;活区文档缺 frontmatter 或 status/type 非法。
 - 文档 `line` 无对应 `lines/<slug>.md` 实体(slug=剥 `(X)` 字母尾+剔非法字符+空格→`-`+NFC);存量值批量播种跑 `worklog-kit upgrade`。
-- **图不变量**(不可 baseline 豁免):`id` 重号;`supersedes`/`supersededBy` 悬垂、自环或不成对(双向须互指);同一 `(line, authorityScope)` 出现两个 active+authoritative(双权威);声明了 `supersededBy` 却仍 draft/active(双活);现役文档引用已关线(见 §一.3 关线)。`status: superseded` 缺 `supersededBy` 也红(此条存量债可 baseline)。
+- **图不变量**(不可 baseline 豁免):`id` 重号;`supersedes`/`supersededBy` 悬垂、自环或不成对(双向须互指);同一 `(line, authorityScope)` 出现两个“`status` 属 `authoritativeStatuses` 且 `authoritative:true`”的当前权威(双权威);声明了 `supersededBy` 却仍 draft/active(双活);现役文档引用已关线(见 §一.3 关线)。`status: superseded` 缺 `supersededBy` 也红(此条存量债可 baseline)。
 - `worklogs/` 存在却缺 `README.md`;`.worklogrc.jsonc` 的 `dirs` 与目录职责表、实际目录三者不一致。
 
 ## 五、误收口回滚(归档只是 git mv,回滚便宜)
