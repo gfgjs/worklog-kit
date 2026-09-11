@@ -3,8 +3,8 @@
 // golden 覆盖面(报告点名清单):shell append(heredoc)、apply_patch、多文件单命令、
 // cache(usage 各桶并入 inn)、重复盘符(mungedTail 同尾)、active session(末行半截 JSON 容错)。
 import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   kindOf, taskOf, isShellWrite, CLI_RE, makeWindow, newAgg, foldSession, totalsOf, mungedTail,
 } from './model.mjs';
@@ -127,4 +127,9 @@ export function selftest() {
 
   console.log(failed ? `\n✗ token-audit selftest 失败 ${failed} 项` : '\n✓ token-audit selftest 全部通过');
   return failed ? 1 : 0;
+}
+
+// 可直接运行，也可被其他审计入口导入；导入时不触发自测。
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  process.exitCode = selftest();
 }

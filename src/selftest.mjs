@@ -59,7 +59,7 @@ const SUITES = [
   ['install-skills', skillsSelftest],
   ['doctor(main 主流程+EOL 体检+行数护栏)', doctorSelftest],
   ['tasks(产品命令 start/list/resume/note/checkpoint/next-id)', tasksSelftest],
-  ['token-audit(解析/跨窗 cumulative delta)', () => externalToolSelftest('tools/token-audit.mjs', ['--selftest'])],
+  ['token-audit(解析/跨窗 cumulative delta)', () => externalToolSelftest('tools/token-audit/selftest.mjs')],
   ['sync-public(fs walker/symlink/containment)', () => externalToolSelftest('tools/sync-public.mjs', ['--fs-selftest'])],
   // R2-01 回归:以**敌意 env**(npm_config_allow_scripts 预置)spawn release-selftest——
   // 模拟「npm run selftest」的 env 注入,证明消费仓 install 对宿主 allow-scripts 免疫。
