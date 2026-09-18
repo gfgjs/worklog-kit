@@ -89,7 +89,7 @@ Markdown 识别是够用即止的最小实现，不是通用解析器。支持�
 ```bash
 node /绝对路径/worklog-kit/bin/worklog.mjs --help
 node /绝对路径/worklog-kit/bin/worklog.mjs init                    # 导出 Skill 到 .agents/skills/worklog
-node /绝对路径/worklog-kit/bin/worklog.mjs context 标题搜索 --role implement --unit T2
+node /绝对路径/worklog-kit/bin/worklog.mjs context title-search --role implement --unit T2
 node /绝对路径/worklog-kit/bin/worklog.mjs check
 ```
 

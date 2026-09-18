@@ -51,7 +51,7 @@ Skill 目录（`skills/worklog/`）可整体复制进任意项目：入口 [SKIL
 
 ```bash
 node /path/to/worklog-kit/bin/worklog.mjs --help
-node /path/to/worklog-kit/bin/worklog.mjs context 标题搜索 --role implement --unit T2
+node /path/to/worklog-kit/bin/worklog.mjs context title-search --role implement --unit T2
 node /path/to/worklog-kit/bin/worklog.mjs check
 ```
 
