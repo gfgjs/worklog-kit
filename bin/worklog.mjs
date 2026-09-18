@@ -1,140 +1,121 @@
 #!/usr/bin/env node
-// worklog-kit CLI 入口。thin-runner:引擎驻本包,消费仓只落配置 + docs + ci.yml。
-// 用法见 `worklog-kit`(无参)或 locales/<lang>.json 的 cli.usage。
-import { loadConfig } from '../src/lib/config.mjs';
-import { makeTranslator, resolveCli } from '../src/lib/i18n.mjs';
-import { main as checkDocs, selftest as docsSelftest } from '../src/check-docs.mjs';
-import { main as checkIndex, selftest as indexSelftest } from '../src/check-index.mjs';
-import { main as buildIndex } from '../src/build-index.mjs';
-import { indexMode } from '../src/lib/config.mjs';
-import { main as skills, selftest as skillsSelftest } from '../src/install-skills.mjs';
-import { main as init } from '../src/init.mjs';
-import { main as doctor } from '../src/doctor.mjs';
-import { main as upgrade, selftest as upgradeSelftest } from '../src/upgrade.mjs';
-import { main as baseline } from '../src/baseline.mjs';
-import { main as teamCmd } from '../src/team.mjs';
-import { main as closeoutCmd } from '../src/closeout.mjs';
-import { selftest as configSelftest } from '../src/lib/config.mjs';
-import { main as selftestAll } from '../src/selftest.mjs';
-import { mainStart, mainList, mainResume, mainNote, mainCheckpoint, mainNextId } from '../src/tasks.mjs';
-import { validateArgs } from '../src/lib/cliargs.mjs';
+// worklog-kit CLI:init / context / check 三个入口。零运行依赖。
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { PKG_ROOT } from '../src/lib/paths.mjs';
+import { runContext } from '../src/context.mjs';
+import { runCheck } from '../src/check.mjs';
+import { DEFAULT_SKILL_TARGET, runInit } from '../src/init.mjs';
 
-const [, , cmd, ...args] = process.argv;
-const root = process.cwd();
-const isSelftest = args.includes('--selftest');
+const pkg = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf8'));
 
-const { config, errors } = loadConfig(root);
-// resolveCli():经 npx/`npm exec` 启动时,hint 里的 `worklog-kit …` 印成 `npx worklog-kit …`
-// (纯 npx 用户没有持久 bin,裸 `worklog-kit` 会 command-not-found 或误敲成 `npx worklog`
-// 撞自遮蔽坑,README §16)。
-const t = makeTranslator(config.lang || 'zh', resolveCli());
+const HELP = `worklog-kit ${pkg.version}
 
-/** 校验命令(check/index):配置形状错时拒绝门禁(否则可能漏判)。 */
-function requireGoodConfig() {
-  if (errors.length) {
-    for (const e of errors) console.error(t('cli.configShapeError', { msg: e }));
-    process.exit(2);
-  }
+任务中枢工具:定位任务、按角色提取接续材料、检查本地文档引用。
+
+用法:
+  worklog-kit init [skill目标目录]
+      把包内 skills/worklog 整目录导出到目标目录。
+      默认目标:${DEFAULT_SKILL_TARGET}(相对当前目录)。
+      已有内容完全相同的文件跳过;存在冲突时预检后整体停止,不覆盖、不部分复制。
+      不写项目 AGENTS、CI 或任务文件。
+
+  worklog-kit context [任务目录或任务名] [--role explore|design|implement|accept] [--unit T1]
+      不带任务时列出 docs/tasks 下未完成任务的名称与阶段。
+      任务名按 docs/tasks 下的目录名解析;也可给仓根内路径。
+      不带 --role 时只输出 state.md 状态。
+      --role 决定追加的 details.md 章节;implement 必须带 --unit。
+
+  worklog-kit check [路径]
+      检查本地 Markdown 链接与片段、任务核心格式与状态指向的单元。
+      默认范围:docs,并跳过 docs/history。
+      显式指定 docs/history(或其子路径)时才按历史材料检查。
+      退出码:0 通过;1 发现问题;2 输入或运行错误。
+
+全局:
+  -h, --help     显示本帮助
+  -v, --version  显示版本
+`;
+
+/** 各命令允许的参数。 */
+const SPECS = {
+  init: { flags: [], values: [] },
+  context: { flags: [], values: ['--role', '--unit'] },
+  check: { flags: [], values: [] },
+};
+
+function fail(messages, code = 2) {
+  for (const m of messages) console.error(m);
+  return code;
 }
 
-function dispatch() {
-  // F-001:参数中央兜底——`--help` 永不执行命令(init --help 曾被当真跑,在 cwd stamp 文件),
-  // 未知参数一律拒绝运行。各命令的局部校验保留作纵深(见 src/lib/cliargs.mjs)。
-  if (cmd !== undefined) {
-    const { help, unknown, missingValue } = validateArgs(cmd, args);
-    if (help) { console.log(t('cli.usage')); return 0; }
-    if (unknown.length) {
-      console.error(t('cli.unknownFlag', { cmd, flags: unknown.join(' ') }));
-      console.log(t('cli.usage'));
-      return 2;
+function parseArgs(cmd, args) {
+  const spec = SPECS[cmd];
+  const out = { positional: [], role: null, unit: null, unknown: [], missingValue: [] };
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg.startsWith('-')) {
+      if (spec.values.includes(arg)) {
+        const value = args[i + 1];
+        if (value === undefined || value.startsWith('-')) {
+          out.missingValue.push(arg);
+          continue;
+        }
+        i += 1;
+        if (arg === '--role') out.role = value;
+        else out.unit = value;
+        continue;
+      }
+      out.unknown.push(arg);
+      continue;
     }
-    // R7-09 拆分修:flag 出现但缺值 ⇒ exit 2(flag 未出现才走各命令的文档化默认)
-    if (missingValue.length) {
-      console.error(t('cli.flagNeedsValue', { cmd, flags: missingValue.join(' ') }));
-      console.log(t('cli.usage'));
-      return 2;
-    }
+    out.positional.push(arg);
   }
-  switch (cmd) {
-    case 'init':
-      return init({ root, t, args });
-    case 'check':
-      if (isSelftest) return docsSelftest();
-      requireGoodConfig();
-      return checkDocs({ root, config, t, args });
-    case 'index': {
-      if (isSelftest) return indexSelftest();
-      requireGoodConfig();
-      // D-009:`index build` / `index check` 显式子命令;裸 `worklog-kit index` 按档别名并
-      // 打印所指——现役脚本/CI 已固化裸 index,别名保兼容,打印防 CLI 层语义分叉。
-      const [sub, ...rest] = args;
-      if (sub === 'build') return buildIndex({ root, config, t, args: rest });
-      if (sub === 'check') return checkIndex({ root, config, t, args: rest });
-      console.log(t('cli.indexAlias', { mode: indexMode(config) }));
-      return checkIndex({ root, config, t, args });
-    }
-    case 'skills':
-      if (isSelftest) return skillsSelftest();
-      return skills({ config, t, args });
-    case 'config':
-      // 目前只有 --selftest 一种用法(配置解析/校验的定点重跑);
-      // 无 --selftest 时打印当前配置的加载结果,便于诊断「我的配置到底被读成什么」。
-      if (isSelftest) return configSelftest();
-      console.log(JSON.stringify(config, null, 2));
-      requireGoodConfig();
-      return 0;
-    case 'baseline':
-      requireGoodConfig();
-      return baseline({ root, config, t, args });
-    case 'team':
-      // P3 阶段 4(D-029):solo→team 一次性迁移。会重写三件套,配置必须可信
-      requireGoodConfig();
-      return teamCmd({ root, config, t, args });
-    case 'closeout':
-      // F-013:收口机械步。agent 环境下本命令的工具权限提示即「用户批准收口」按钮
-      requireGoodConfig();
-      return closeoutCmd({ root, config, t, args });
-    // ── 产品化机械命令(复审 §8.2):建档/清单/接续视图/分节追加/热区压缩/编号分配 ──
-    case 'start':
-      requireGoodConfig();
-      return mainStart({ root, config, t, args });
-    case 'list':
-      requireGoodConfig();
-      return mainList({ root, config, t, args });
-    case 'resume':
-      requireGoodConfig();
-      return mainResume({ root, config, t, args });
-    case 'note':
-      requireGoodConfig();
-      return mainNote({ root, config, t, args });
-    case 'checkpoint':
-      requireGoodConfig();
-      return mainCheckpoint({ root, config, t, args });
-    case 'next-id':
-      requireGoodConfig();
-      return mainNextId({ root, config, t, args });
-    case 'upgrade':
-      // `--selftest` 必须在真跑之前判。此前漏了这一支:`worklog-kit upgrade --selftest`
-      // 会被当成「带一个无关标志的真迁移」执行——施工时实测踩中,当场把本仓配置升版并
-      // 抹掉全部注释(F-005)。其余命令都有这一支,唯独它没有,是**不一致本身**在咬人。
-      if (isSelftest) return upgradeSelftest();
-      // 刻意**不**过 requireGoodConfig:配置旧到过不了当前校验时,upgrade 正是那把梯子。
-      // 拿新门拦住通往新门的路,就是 R5-C3 说的「只上门不给梯子」。
-      return upgrade({ root, t, args });
-    case 'selftest':
-      return selftestAll();
-    case 'doctor':
-      return doctor({ root, t, args });
-    case undefined:
-    case '-h':
-    case '--help':
-      console.log(t('cli.usage'));
-      return 0;
-    default:
-      console.error(t('cli.unknownCommand', { cmd }));
-      console.log(t('cli.usage'));
-      return 2;
-  }
+  return out;
 }
 
-process.exit(dispatch());
+function main() {
+  const [cmd, ...args] = process.argv.slice(2);
+  // 全局开关:任何位置都只打印帮助或版本,不执行命令
+  if (cmd === undefined || cmd === '--help' || cmd === '-h' || args.includes('--help') || args.includes('-h')) {
+    console.log(HELP);
+    return 0;
+  }
+  if (cmd === '--version' || cmd === '-v' || args.includes('--version') || args.includes('-v')) {
+    console.log(pkg.version);
+    return 0;
+  }
+  if (!Object.hasOwn(SPECS, cmd)) {
+    return fail([`未知命令：${cmd}`, '可用命令：init、context、check。用 --help 查看用法。']);
+  }
+  const parsed = parseArgs(cmd, args);
+  if (parsed.unknown.length > 0) {
+    return fail([`${cmd} 不支持的参数：${parsed.unknown.join(' ')}`, '用 --help 查看用法。']);
+  }
+  if (parsed.missingValue.length > 0) {
+    return fail([`${parsed.missingValue.join(' ')} 缺少参数值`, '用 --help 查看用法。']);
+  }
+  if (parsed.positional.length > 1) {
+    return fail([`${cmd} 只接受一个位置参数,收到：${parsed.positional.join(' ')}`, '用 --help 查看用法。']);
+  }
+
+  const root = process.cwd();
+  const target = parsed.positional[0] ?? null;
+  if (cmd === 'init') {
+    const result = runInit({ root, cwd: root, target });
+    for (const m of result.messages) (result.code === 0 ? console.log : console.error)(m);
+    return result.code;
+  }
+  if (cmd === 'context') {
+    const result = runContext({ root, cwd: root, target, role: parsed.role, unit: parsed.unit });
+    if (result.text) console.log(result.text);
+    if (result.messages) for (const m of result.messages) console.error(m);
+    return result.code;
+  }
+  const result = runCheck({ root, cwd: root, scope: target ?? 'docs' });
+  if (result.text) console.log(result.text);
+  if (result.messages) for (const m of result.messages) console.error(m);
+  return result.code;
+}
+
+process.exitCode = main();
