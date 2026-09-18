@@ -1,7 +1,7 @@
 // context:按任务与角色提取接续材料。只读,不写任何持久状态。
 // 输出中文直出消息,不引入配置层或语言包契约。
 import { dirname, join } from 'node:path';
-import { makeFenceTracker, scanLinks, slugify } from './lib/md.mjs';
+import { anchorMap, makeFenceTracker, scanLinks } from './lib/md.mjs';
 import { buildOutline, findChild, findSections, sectionBody, sectionText } from './lib/outline.mjs';
 import { isDir, isFile, readText, relToRoot, resolveInRoot } from './lib/paths.mjs';
 import {
@@ -110,7 +110,7 @@ function collectReading(root, sources) {
         resolved = { body: readText(absPath).replace(/\s+$/, ''), title: null };
       } else {
         const outline = buildOutline(readText(absPath));
-        const hits = outline.items.filter((h) => slugify(h.title) === anchor);
+        const hits = anchorMap(outline.items).get(anchor) ?? [];
         if (hits.length === 0) {
           issues.push({ file: src.relPath, reason: `必读片段不存在：${rel}#${anchor}` });
           return;
@@ -123,7 +123,8 @@ function collectReading(root, sources) {
       }
       // 已在所选章节中完整出现的章节不再重复注入
       if (resolved.title !== null && selected.has(`${absPath}#${resolved.title}`)) return;
-      const key = `${absPath}#${resolved.title ?? ''}`;
+      // 同名标题的不同编号锚点是不同片段,去重按锚点而不是标题
+      const key = `${absPath}#${anchor ?? ''}`;
       if (seen.has(key)) return;
       seen.add(key);
       items.push({ source: src.relPath, target: raw, rel, body: resolved.body });

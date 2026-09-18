@@ -153,15 +153,20 @@ export function slugify(title) {
     .replace(/\s+/g, '-');
 }
 
-/** 标题集合的可用锚点:同名标题按惯例追加 -1、-2。 */
-export function anchorSet(headings) {
+/**
+ * 标题集合的锚点索引:同名标题按惯例追加 -1、-2。
+ * 返回 锚点 → 命中标题数组;编号锚点与字面量同名标题撞车时命中多项,由调用方判定唯一。
+ */
+export function anchorMap(headings) {
   const seen = new Map();
-  const set = new Set();
+  const map = new Map();
   for (const h of headings) {
     const slug = slugify(h.title);
     const n = seen.get(slug) ?? 0;
     seen.set(slug, n + 1);
-    set.add(n === 0 ? slug : slug + '-' + n);
+    const anchor = n === 0 ? slug : slug + '-' + n;
+    if (!map.has(anchor)) map.set(anchor, []);
+    map.get(anchor).push(h);
   }
-  return set;
+  return map;
 }

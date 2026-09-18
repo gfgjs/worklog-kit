@@ -191,6 +191,29 @@ test('必读片段一层提取、去重且不重复已选章节', () => {
   }
 });
 
+test('同名标题的编号锚点与 check 用同一套规则解析', () => {
+  const root = makeTempRoot();
+  try {
+    // guide.md 两处“输入处理”:#输入处理 取第一处,#输入处理-1 取第二处
+    writeFiles(root, {
+      'docs/guide.md': '# 指南\n\n## 输入处理\n\n第一处。\n\n## 输入处理\n\n第二处。\n',
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
+        '继续 T1。',
+        '必读：[输入处理](../../guide.md#输入处理)',
+        '必读：[输入处理二](../../guide.md#输入处理-1)',
+      ].join('\n')),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
+    });
+    const result = run(root, { role: 'implement', unit: 'T1' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.equal(result.readings.length, 2);
+    assert.ok(result.readings[0].body.includes('第一处'));
+    assert.ok(result.readings[1].body.includes('第二处'));
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('围栏与行内代码中的必读不展开', () => {
   const root = makeTempRoot();
   try {
@@ -218,15 +241,16 @@ test('必读引用的问题一律报错且不输出材料', () => {
     { line: '必读：[源码](../src/a.mjs)', expect: '源码等材料请用普通指针' },
     { line: '必读：[缺失](../../nope.md)', expect: '无法解析' },
     { line: '必读：[指南](../../guide.md#没有这个片段)', expect: '不存在' },
-    { line: '必读：[指南](../../guide.md#重复标题)', expect: '定位不唯一' },
+    { line: '必读：[指南](../../guide.md#重复标题-1)', expect: '定位不唯一' },
     { line: '必读：没有链接', expect: '缺少链接' },
     { line: '必读：[一](../../guide.md) 与 [二](../../guide.md#其他)', expect: '一行只能有一条链接' },
   ];
   for (const item of cases) {
     const root = makeTempRoot();
     try {
+      // 第二处“重复标题”的编号锚点与字面量“重复标题-1”撞车,命中 2 处
       writeFiles(root, {
-        'docs/guide.md': '# 指南\n\n## 重复标题\n\n甲。\n\n## 重复标题\n\n乙。\n',
+        'docs/guide.md': '# 指南\n\n## 重复标题\n\n甲。\n\n## 重复标题\n\n乙。\n\n## 重复标题-1\n\n丙。\n',
         'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', '继续 T1。\n' + item.line),
         'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
       });

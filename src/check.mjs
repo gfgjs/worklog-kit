@@ -3,7 +3,7 @@
 // 只判定可明确判定的结构问题,不声称语义正确。
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { anchorSet, makeFenceTracker, scanLinks, scanRefDefinitions, splitLines } from './lib/md.mjs';
+import { anchorMap, makeFenceTracker, scanLinks, scanRefDefinitions, splitLines } from './lib/md.mjs';
 import { buildOutline, findChild, sectionBody, sectionText } from './lib/outline.mjs';
 import { isDir, isFile, readText, relToRoot, resolveInRoot } from './lib/paths.mjs';
 import {
@@ -60,7 +60,7 @@ function collectMarkdown(root, scopeAbs, includeHistory) {
 function checkFile(root, absFile, issues) {
   const rel = relToRoot(root, absFile);
   const text = readText(absFile);
-  const ownAnchors = anchorSet(buildOutline(text).items);
+  const ownAnchors = anchorMap(buildOutline(text).items);
   const refDefs = scanRefDefinitions(text);
   const anchorCache = new Map();
   const inFence = makeFenceTracker();
@@ -102,7 +102,7 @@ function checkFile(root, absFile, issues) {
         continue;
       }
       if (!anchor || !isFile(abs) || !/\.md$/i.test(abs)) continue;
-      if (!anchorCache.has(abs)) anchorCache.set(abs, anchorSet(buildOutline(readText(abs)).items));
+      if (!anchorCache.has(abs)) anchorCache.set(abs, anchorMap(buildOutline(readText(abs)).items));
       if (!anchorCache.get(abs).has(anchor)) {
         issues.push({ ...at, reason: `链接目标 ${relToRoot(root, abs)} 没有片段 ${anchor}` });
       }

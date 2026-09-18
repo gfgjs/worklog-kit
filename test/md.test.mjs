@@ -1,7 +1,7 @@
 // Markdown 最小识别的支持范围:围栏、行内代码遮蔽、括号路径、引用式链接、中文锚点。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { anchorSet, makeFenceTracker, normalizeTarget, scanHeadings, scanLinks, scanRefDefinitions, slugify } from '../src/lib/md.mjs';
+import { anchorMap, makeFenceTracker, normalizeTarget, scanHeadings, scanLinks, scanRefDefinitions, slugify } from '../src/lib/md.mjs';
 
 test('围栏内的标题与链接不算正文', () => {
   const text = ['# 真标题', '```', '## 假标题', '```', '## 真标题二'].join('\n');
@@ -38,9 +38,16 @@ test('引用式链接与定义', () => {
 test('中文标题锚点与重复标题编号', () => {
   assert.equal(slugify('T2 裁剪与空值'), 't2-裁剪与空值');
   const headings = [{ title: '目标与验收' }, { title: '目标与验收' }];
-  const set = anchorSet(headings);
-  assert.ok(set.has('目标与验收'));
-  assert.ok(set.has('目标与验收-1'));
+  const map = anchorMap(headings);
+  assert.equal(map.get('目标与验收').length, 1);
+  assert.equal(map.get('目标与验收-1').length, 1);
+});
+
+test('编号锚点与字面量同名标题撞车时报多处命中', () => {
+  // 标题字面就叫“目标与验收-1”,与第二处“目标与验收”的编号锚点相同
+  const headings = [{ title: '目标与验收' }, { title: '目标与验收' }, { title: '目标与验收-1' }];
+  const map = anchorMap(headings);
+  assert.equal(map.get('目标与验收-1').length, 2);
 });
 
 test('围栏跟踪器区分反引号与波浪线', () => {
