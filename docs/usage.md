@@ -95,4 +95,4 @@ node /绝对路径/worklog-kit/bin/worklog.mjs check
 
 初始化只导出 Skill 文件：不装依赖，不写项目规则、CI 或任务文件。可运行的接续样例见 `examples/title-search/`。
 
-本机自检（执行者回传，证据见[任务记录](tasks/2026-09-19-task-hub/state.md)）：测试 50 项 0 失败，语法检查通过；默认 `docs` 范围与仓根的文档检查通过；打包产物在临时项目里走通 `init`、各角色 `context` 与 `check`。验证仅限本机，未跑远端 CI，也未在其他操作系统验证。
+本机自检（执行者回传，证据见[任务记录](tasks/2026-09-19-task-hub/state.md)）：`npm test` 全绿，语法检查通过；默认 `docs` 范围与仓根的文档检查通过；打包产物在临时项目里走通 `init`、各角色 `context` 与 `check`。验证仅限本机，未跑远端 CI，也未在其他操作系统验证。
