@@ -77,7 +77,7 @@ node src/cli.mjs readme                      # 命令行实跑
 ## 开发
 
 ```bash
-npm test        # node --test test/*.test.mjs
+npm test        # 逐个列出 test/*.test.mjs,跨 shell 与 node 20/22 可移植
 npm run check   # node bin/worklog.mjs check
 ```
 

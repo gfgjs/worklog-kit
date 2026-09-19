@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "check": "node bin/worklog.mjs check",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/check.test.mjs test/cli.test.mjs test/context.test.mjs test/init.test.mjs test/md.test.mjs"
   },
   "keywords": [
     "documentation",

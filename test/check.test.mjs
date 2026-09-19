@@ -114,7 +114,8 @@ test('任务结构检查不随范围入口改变', () => {
   try {
     writeFiles(root, broken);
     // 覆盖 docs/tasks 的任何入口都要报 T9 缺单元;含 onlydetails 的入口还要报缺核心文件
-    for (const scope of ['docs', '.', 'DOCS', 'docs/tasks']) {
+    // 不含大小写变体:Linux 文件系统大小写敏感,DOCS 解析不到目录属平台行为,不是工具承诺
+    for (const scope of ['docs', '.', 'docs/tasks']) {
       const result = run(root, scope);
       assert.equal(result.code, 1, scope);
       assert.ok(result.text.includes('T9'), scope);

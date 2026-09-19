@@ -24,5 +24,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node --test test/*.test.mjs
+      # 列出文件而不是目录或裸 glob:pwsh 不展开 glob,node 20 的 --test 也不支持 glob 参数
+      - run: node --test test/check.test.mjs test/cli.test.mjs test/context.test.mjs test/init.test.mjs test/md.test.mjs
       - run: node bin/worklog.mjs check
