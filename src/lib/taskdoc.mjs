@@ -2,10 +2,13 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildOutline, findSections, sectionBody, sectionText } from './outline.mjs';
+import { makeFenceTracker, splitLines } from './md.mjs';
 import { isDir, isFile, readText, resolveInRoot } from './paths.mjs';
 
 export const STAGES = ['探索', '设计', '施工', '待验收', '完成', '已取消'];
 export const STATE_SECTIONS = ['当前', '进度', '下一步与阅读'];
+/** “当前”节的检查项字段;缺失判错。方案版本与阻塞属说明字段,缺失不判错。 */
+export const STATE_FIELDS = ['目标', '阶段', '执行边界', '当前'];
 export const UNIT_SECTIONS = [
   '目标与验收',
   '依赖与前提',
@@ -90,17 +93,30 @@ export function requireSections(outline, relPath, titles, label, issues) {
   return found;
 }
 
+/** 剥除围栏内的行,围栏里的示例字段行不参与读取。 */
+export function stripFences(body) {
+  const inFence = makeFenceTracker();
+  return splitLines(body).filter((line) => !inFence(line)).join('\n');
+}
+
 /** 从 state.md 的“当前”章节正文读阶段(围栏内与其它章节的假“阶段：”不参与)。 */
 export function readStage(state, currentSection) {
   if (!currentSection) return null;
-  const m = STAGE_RE.exec(sectionBody(state.outline, currentSection));
+  const m = STAGE_RE.exec(stripFences(sectionBody(state.outline, currentSection)));
   if (!m) return null;
   const stage = m[1].replace(/[。.]$/, '');
   return STAGES.includes(stage) ? stage : null;
 }
 
+/** “当前”节缺失的检查项字段列表。 */
+export function missingStateFields(state, currentSection) {
+  if (!currentSection) return [];
+  const body = stripFences(sectionBody(state.outline, currentSection));
+  return STATE_FIELDS.filter((name) => !new RegExp(`^${name}[：:]\\s*\\S`, 'm').test(body));
+}
+
 export function readDesignVersion(details, designSection) {
-  const m = VERSION_RE.exec(sectionText(details.outline, designSection));
+  const m = VERSION_RE.exec(stripFences(sectionText(details.outline, designSection)));
   return m ? m[1] : null;
 }
 

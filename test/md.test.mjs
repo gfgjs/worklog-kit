@@ -21,6 +21,16 @@ test('成对括号路径与尖括号目标', () => {
   assert.equal(links[0].target, 'a b/c.md');
 });
 
+test('整体尖括号是真实目标,散布尖括号才是占位', () => {
+  const real = scanLinks('见 [指南](<guide.md#用法>)');
+  assert.equal(real[0].placeholder, false);
+  assert.equal(real[0].target, 'guide.md#用法');
+  const mixed = scanLinks('必读：[<名称>](<相对当前文件的路径>.md#<锚点>)');
+  assert.equal(mixed[0].placeholder, true);
+  const half = scanLinks('见 [骨架](<路径>.md#<锚点>)');
+  assert.equal(half[0].placeholder, true);
+});
+
 test('链接标题与转义空格归一', () => {
   assert.equal(normalizeTarget('a.md "标题"'), 'a.md');
   assert.equal(normalizeTarget('a\\ b.md'), 'a b.md');
@@ -56,4 +66,10 @@ test('围栏跟踪器区分反引号与波浪线', () => {
   assert.equal(f('## 还在围栏里'), true);
   assert.equal(f('~~~'), true);
   assert.equal(f('## 出来了'), false);
+});
+
+test('占位判定不受行内代码遮蔽影响', () => {
+  // 遮蔽后 inner 里的尖括号已换成空白,散布占位只可能来自未遮蔽部分
+  const [a] = scanLinks('必读：[名称](details.md#锚点)');
+  assert.equal(a.placeholder, false);
 });

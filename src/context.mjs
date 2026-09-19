@@ -68,7 +68,12 @@ export function listTasks(root) {
 function collectReading(root, sources) {
   const items = [];
   const issues = [];
-  const selected = new Set(sources.map((s) => `${s.absPath}#${s.title}`));
+  // 已选章节按文件登记行区间;片段的标题行落在某区间内即已完整出现,不重复注入
+  const selected = new Map();
+  for (const s of sources) {
+    if (!selected.has(s.absPath)) selected.set(s.absPath, []);
+    selected.get(s.absPath).push({ start: s.start, end: s.end });
+  }
   const seen = new Set();
   for (const src of sources) {
     const base = dirname(src.absPath);
@@ -119,10 +124,11 @@ function collectReading(root, sources) {
           issues.push({ file: src.relPath, reason: `必读片段定位不唯一：${rel}#${anchor} 命中 ${hits.length} 处` });
           return;
         }
-        resolved = { body: sectionText(outline, hits[0]), title: hits[0].title };
+        resolved = { body: sectionText(outline, hits[0]), title: hits[0].title, ...hits[0] };
       }
-      // 已在所选章节中完整出现的章节不再重复注入
-      if (resolved.title !== null && selected.has(`${absPath}#${resolved.title}`)) return;
+      // 已在所选章节中完整出现的章节不再重复注入:片段的标题行落在所选章节的行区间内
+      const ranges = selected.get(absPath);
+      if (ranges && resolved.start !== undefined && ranges.some((r) => resolved.start >= r.start && resolved.start <= r.end)) return;
       // 同名标题的不同编号锚点是不同片段,去重按锚点而不是标题
       const key = `${absPath}#${anchor ?? ''}`;
       if (seen.has(key)) return;
@@ -260,5 +266,5 @@ export function runContext({ root, cwd, target, role, unit }) {
 }
 
 function source(kind, title, doc, item) {
-  return { kind, title, relPath: doc.relPath, absPath: doc.path, body: sectionText(doc.outline, item) };
+  return { kind, title, relPath: doc.relPath, absPath: doc.path, start: item.start, end: item.end, body: sectionText(doc.outline, item) };
 }

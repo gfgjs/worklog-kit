@@ -79,7 +79,8 @@ export function normalizeTarget(raw) {
 
 /**
  * 扫描一行中的链接;行内代码中的示例链接会被忽略。
- * 目标里带 <...> 占位标记的(模板骨架)标记为 placeholder,由调用方决定是否跳过。
+ * 目标整体用 <...> 包裹是合法写法;只有 <...> 散布在目标里的(模板骨架)标记为
+ * placeholder,由调用方决定是否跳过。
  * @returns {{kind:'inline'|'ref', isImage:boolean, text:string, target?:string, label?:string, placeholder?:boolean, index:number}[]}
  */
 export function scanLinks(line) {
@@ -98,7 +99,7 @@ export function scanLinks(line) {
       isImage: m[1] === '!',
       text: m[2],
       target: normalizeTarget(inner),
-      placeholder: /[<>]/.test(inner),
+      placeholder: /[<>]/.test(inner) && !/^<[^<>\n]*>$/.test(inner.trim()),
       index: m.index,
     });
   }

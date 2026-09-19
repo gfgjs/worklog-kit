@@ -214,6 +214,89 @@ test('同名标题的编号锚点与 check 用同一套规则解析', () => {
   }
 });
 
+test('必读指向所选章节内的同名片段不被标题去重误伤', () => {
+  const root = makeTempRoot();
+  try {
+    // details.md 顶层“目标与验收”与 T1 单元内“目标与验收”同名;
+    // 必读指向单元内那处(编号锚点),不得被顶层同名章节吞掉
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
+        '继续 T1。',
+        '必读：[单元验收](details.md#目标与验收-1)',
+      ].join('\n')),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 目标与验收: '单元验收正文。' }) }),
+    });
+    const result = run(root, { role: 'accept' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    const unitReading = result.readings.find((r) => r.body.includes('单元验收正文'));
+    assert.ok(unitReading, '单元内的“目标与验收”片段应作为必读注入');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('必读指向已注入单元内的小节不重复注入', () => {
+  const root = makeTempRoot();
+  try {
+    // implement 角色已注入 T1 单元全文,其中含“### 修改范围”;
+    // 必读指向该小节时,其标题行落在所选单元的行区间内,应跳过
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
+        '继续 T1。',
+        '必读：[修改范围](details.md#修改范围)',
+      ].join('\n')),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 修改范围: '单元修改范围正文。' }) }),
+    });
+    const result = run(root, { role: 'implement', unit: 'T1' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.equal(result.readings.length, 0, '单元内片段已完整出现,不应再注入');
+    assert.equal(result.text.split('### 修改范围').length - 1, 1);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('围栏内的示例阶段行不参与阶段读取', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': [
+        '# 任务',
+        '',
+        '## 当前',
+        '骨架示例：',
+        '',
+        '```',
+        '阶段：完成',
+        '```',
+        '',
+        '目标：示例目标。',
+        '阶段：施工',
+        '执行边界：示例边界。',
+        '当前：T1。',
+        '',
+        '## 进度',
+        '| 单元 | 状态 | 说明 |',
+        '|---|---|---|',
+        '| T1 单元 | 已自检 | |',
+        '',
+        '## 下一步与阅读',
+        '继续。',
+        '',
+      ].join('\n'),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
+    });
+    const explicit = run(root, {});
+    assert.equal(explicit.code, 0);
+    assert.ok(explicit.text.includes('阶段：施工'), '阶段应取围栏外的真实行');
+    // 无参列表里该任务应以其真实阶段出现
+    const list = run(root, { target: null });
+    assert.ok(list.text.includes('demo [施工]'), '未完成任务列表应含本任务');
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('围栏与行内代码中的必读不展开', () => {
   const root = makeTempRoot();
   try {

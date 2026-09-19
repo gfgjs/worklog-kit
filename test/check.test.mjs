@@ -88,6 +88,88 @@ test('模板骨架的占位链接不报错', () => {
   }
 });
 
+test('整体尖括号目标是真实链接,断链同样报错', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/a.md': '# A\n\n[普通断链](nope.md) 与 [尖括号断链](<nope2.md>)\n',
+      'docs/ok.md': '# B\n\n[正常](<a.md>)\n',
+    });
+    const result = run(root);
+    assert.equal(result.code, 1);
+    assert.ok(result.text.includes('nope.md'));
+    assert.ok(result.text.includes('nope2.md'));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('任务结构检查不随范围入口改变', () => {
+  const broken = {
+    'docs/tasks/demo/state.md': stateDoc({ progress: '| T9 缺失 | 未开始 | 无 |' }),
+    'docs/tasks/demo/details.md': detailsDoc({ units: '' }),
+    'docs/tasks/onlydetails/details.md': '# 详情\n\n## 目标与验收\n正文。\n',
+  };
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, broken);
+    // 覆盖 docs/tasks 的任何入口都要报 T9 缺单元;含 onlydetails 的入口还要报缺核心文件
+    for (const scope of ['docs', '.', 'DOCS', 'docs/tasks']) {
+      const result = run(root, scope);
+      assert.equal(result.code, 1, scope);
+      assert.ok(result.text.includes('T9'), scope);
+      assert.ok(result.text.includes('找不到对应单元'), scope);
+      assert.ok(result.text.includes('任务缺少核心文件'), scope);
+    }
+    // 单个任务目录作为范围:范围自身的问题同样受检
+    const demo = run(root, 'docs/tasks/demo');
+    assert.equal(demo.code, 1);
+    assert.ok(demo.text.includes('找不到对应单元'), 'demo 入口应报 T9');
+    const single = run(root, 'docs/tasks/onlydetails');
+    assert.equal(single.code, 1);
+    assert.ok(single.text.includes('任务缺少核心文件'), 'onlydetails 应报缺 state.md');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('「当前」节缺检查项字段报错,字段在围栏内不算数', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': [
+        '# 任务',
+        '',
+        '## 当前',
+        '```',
+        '目标：围栏示例',
+        '阶段：完成',
+        '```',
+        '阶段：探索',
+        '',
+        '## 进度',
+        '| 单元 | 状态 | 说明 |',
+        '|---|---|---|',
+        '',
+        '## 下一步与阅读',
+        '无。',
+        '',
+      ].join('\n'),
+      'docs/tasks/demo/details.md': ['# 详情', '', '## 目标与验收', '需求。', ''].join('\n'),
+    });
+    const result = run(root);
+    assert.equal(result.code, 1, result.text);
+    // 围栏里的“目标：”不算,真实“阶段：探索”也不算缺失
+    assert.ok(result.text.includes('缺少检查项字段“目标：”'));
+    assert.ok(!result.text.includes('缺少检查项字段“阶段：”'));
+    assert.ok(result.text.includes('缺少检查项字段“执行边界：”'));
+    assert.ok(result.text.includes('缺少检查项字段“当前：”'));
+    assert.ok(!result.text.includes('缺少合法阶段'), '阶段行存在且合法,不应再报枚举');
+  } finally {
+    cleanup(root);
+  }
+});
+
 test('引用式链接按定义检查', () => {
   const root = makeTempRoot();
   try {

@@ -15,6 +15,7 @@ import {
   isPlaceholder,
   listTaskDirs,
   loadTask,
+  missingStateFields,
   parseProgressRows,
   requireSections,
 } from './lib/taskdoc.mjs';
@@ -119,7 +120,12 @@ function checkTask(root, absDir, issues) {
     return;
   }
   const task = loadTask(root, absDir, relDir);
-  if (task.stage === null) {
+  // 检查项字段缺失直接报字段;阶段行存在但不合法才报枚举,避免同一缺失报两条
+  const missingFields = missingStateFields(task.state, h2(task.state.outline, '当前'));
+  for (const name of missingFields) {
+    issues.push({ file: task.state.relPath, reason: `“当前”章节缺少检查项字段“${name}：”` });
+  }
+  if (task.stage === null && !missingFields.includes('阶段')) {
     issues.push({ file: task.state.relPath, reason: `“当前”章节缺少合法阶段,可用：${STAGES.join('|')}` });
   }
   const stateSections = requireSections(task.state.outline, task.state.relPath, STATE_SECTIONS, 'state.md ', issues);
@@ -166,15 +172,31 @@ function checkTask(root, absDir, issues) {
   }
 }
 
-/** 范围内可直接检查的任务目录。 */
+/** 范围内可直接检查的任务目录:范围内出现 docs/tasks 布局即检查,不按范围字面量挑入口。 */
 function tasksUnder(root, scopeAbs) {
-  const rel = relToRoot(root, scopeAbs);
   const tasksRoot = join(root, 'docs', 'tasks');
-  if (rel === 'docs/tasks' || rel === 'docs') {
+  if (relCovers(relToRoot(root, scopeAbs), 'docs/tasks')) {
     return listTaskDirs(tasksRoot).map((n) => join(tasksRoot, n));
   }
-  if (isFile(join(scopeAbs, 'state.md'))) return [scopeAbs];
-  return [];
+  // 范围不含 docs/tasks 时,检查范围自身或其直接子目录里的任务目录
+  if (isFile(join(scopeAbs, 'state.md')) || isFile(join(scopeAbs, 'details.md'))) return [scopeAbs];
+  const out = [];
+  if (isDir(scopeAbs)) {
+    for (const name of listTaskDirs(scopeAbs)) {
+      if (isFile(join(scopeAbs, name, 'state.md')) || isFile(join(scopeAbs, name, 'details.md'))) {
+        out.push(join(scopeAbs, name));
+      }
+    }
+  }
+  return out;
+}
+
+/** 范围路径是否覆盖给定目录(Windows 下大小写不敏感,分隔符归一为 /)。 */
+function relCovers(scopeRel, dirRel) {
+  const norm = (p) => p.split(/[\\/]+/).filter(Boolean).join('/').toLowerCase();
+  const a = norm(scopeRel);
+  const b = norm(dirRel);
+  return a === b || a === '.' || b.startsWith(a + '/');
 }
 
 export function runCheck({ root, cwd, scope }) {
