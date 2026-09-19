@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { PKG_ROOT } from '../src/lib/paths.mjs';
 import { cleanup, makeTempRoot, simpleTask, writeFiles } from './helpers.mjs';
@@ -107,4 +107,39 @@ test('init 通过 CLI 导出到默认目录', () => {
   } finally {
     cleanup(root);
   }
+});
+
+test('context 索引、list、参数互斥及全局开关优先级', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, { ...simpleTask(), 'docs/todo.md': '# 候选索引\n' });
+    assert.match(run(['context'], root).out, /候选索引/);
+    const list = run(['context', '--list'], root);
+    assert.equal(list.code, 0);
+    assert.match(list.out, /demo/);
+    assert.doesNotMatch(list.out, /候选索引/);
+    for (const args of [
+      ['context', '--list', 'demo'], ['context', 'demo', '--list'],
+      ['context', '--list', '--role', 'explore'], ['context', '--list', '--unit', 'T1'],
+      ['context', '--role', 'explore'], ['context', '--unit', 'T1'],
+      ['context', '--role', 'implement', '--unit', 'T1'],
+    ]) {
+      const result = run(args, root);
+      assert.equal(result.code, 2, args.join(' '));
+      assert.equal(result.out, '');
+      for (const flag of ['--help', '--version']) {
+        for (const withFlag of [[flag, ...args], [args[0], flag, ...args.slice(1)], [...args, flag]]) {
+          const global = run(withFlag, root);
+          assert.equal(global.code, 0);
+          assert.equal(global.err, '');
+        }
+      }
+    }
+    writeFiles(root, { 'docs/todo.md': ' \n' });
+    assert.equal(run(['context'], root).code, 1);
+    assert.equal(run(['context', '--list'], root).code, 0);
+    rmSync(join(root, 'docs', 'todo.md'));
+    mkdirSync(join(root, 'docs', 'todo.md'));
+    assert.equal(run(['context'], root).code, 2);
+  } finally { cleanup(root); }
 });

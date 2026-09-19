@@ -1,5 +1,6 @@
 // context:按任务与角色提取接续材料。只读,不写任何持久状态。
 // 输出中文直出消息,不引入配置层或语言包契约。
+import { lstatSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { anchorMap, makeFenceTracker, scanLinks } from './lib/md.mjs';
 import { buildOutline, findChild, findSections, sectionBody, sectionText } from './lib/outline.mjs';
@@ -139,7 +140,52 @@ function collectReading(root, sources) {
   return { items, issues };
 }
 
-export function runContext({ root, cwd, target, role, unit }) {
+/** 无参只读工作索引;只有路径缺失才回退列表。 */
+function workIndex(root) {
+  const path = join(root, 'docs', 'todo.md');
+  try {
+    lstatSync(path);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      // Windows 也可能把父路径不是目录报告成 ENOENT。
+      try {
+        if (!statSync(dirname(path)).isDirectory()) {
+          return { code: 2, messages: ['无法访问 docs/todo.md：docs 不是目录'] };
+        }
+      } catch (parentError) {
+        if (parentError.code !== 'ENOENT') {
+          return { code: 2, messages: [`无法访问 docs/todo.md：${parentError.message}`] };
+        }
+      }
+      return { code: 0, text: `${listTasks(root).text}\n可按需创建 docs/todo.md 作为工作选择索引。` };
+    }
+    return { code: 2, messages: [`无法访问 docs/todo.md：${error.message}`] };
+  }
+  try {
+    if (!statSync(path).isFile()) {
+      return { code: 2, messages: ['docs/todo.md 不是文件'] };
+    }
+    const body = readFileSync(path, 'utf8');
+    if (!body.trim()) return { code: 1, messages: ['docs/todo.md 为空，请填写工作选择索引'] };
+    return { code: 0, text: `来源：docs/todo.md\n\n${body}\n用 context --list 查看全部未完成任务。` };
+  } catch (error) {
+    return { code: 2, messages: [`无法读取 docs/todo.md：${error.message}`] };
+  }
+}
+
+export function runContext({ root, cwd, target = null, role = null, unit = null, list = false }) {
+  if (list) {
+    if (target !== null || role !== null || unit !== null) {
+      return { code: 2, messages: ['--list 与任务参数、--role、--unit 互斥'] };
+    }
+    return { code: 0, text: listTasks(root).text };
+  }
+  if (target === null) {
+    if (role !== null || unit !== null) {
+      return { code: 2, messages: ['--role 或 --unit 需要指定任务'] };
+    }
+    return workIndex(root);
+  }
   if (role !== null && !ROLES.includes(role)) {
     return { code: 2, messages: [`未知角色：${role}。可用角色：${ROLES.join('|')}`] };
   }
@@ -154,9 +200,6 @@ export function runContext({ root, cwd, target, role, unit }) {
   }
   if (role === 'implement' && unit === null) {
     return { code: 2, messages: ['implement 角色必须指定 --unit'] };
-  }
-  if (target === null) {
-    return { code: 0, text: listTasks(root).text };
   }
 
   const absDir = resolveTaskDir(root, cwd, target);

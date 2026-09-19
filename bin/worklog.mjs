@@ -21,9 +21,10 @@ const HELP = `worklog-kit ${pkg.version}
       不写项目 AGENTS、CI 或任务文件。
 
   worklog-kit context [任务目录或任务名] [--role explore|design|implement|accept] [--unit T1]
-      不带任务时列出 docs/tasks 下未完成任务的名称与阶段。
+      无参数时输出 docs/todo.md 原文;缺失时回退未完成任务列表。
+      --list 显式列出全部未完成任务,与任务、--role、--unit 互斥。
       任务名按 docs/tasks 下的目录名解析;也可给仓根内路径。
-      不带 --role 时只输出 state.md 状态。
+      不带 --role 时只输出 state.md 的当前、进度、下一步与阅读三节。
       --role 决定追加的 details.md 章节;implement 必须带 --unit。
 
   worklog-kit check [路径]
@@ -40,7 +41,7 @@ const HELP = `worklog-kit ${pkg.version}
 /** 各命令允许的参数。 */
 const SPECS = {
   init: { flags: [], values: [] },
-  context: { flags: [], values: ['--role', '--unit'] },
+  context: { flags: ['--list'], values: ['--role', '--unit'] },
   check: { flags: [], values: [] },
 };
 
@@ -51,10 +52,14 @@ function fail(messages, code = 2) {
 
 function parseArgs(cmd, args) {
   const spec = SPECS[cmd];
-  const out = { positional: [], role: null, unit: null, unknown: [], missingValue: [] };
+  const out = { positional: [], role: null, unit: null, list: false, unknown: [], missingValue: [] };
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg.startsWith('-')) {
+      if (spec.flags.includes(arg)) {
+        out.list = true;
+        continue;
+      }
       if (spec.values.includes(arg)) {
         const value = args[i + 1];
         if (value === undefined || value.startsWith('-')) {
@@ -107,7 +112,7 @@ function main() {
     return result.code;
   }
   if (cmd === 'context') {
-    const result = runContext({ root, cwd: root, target, role: parsed.role, unit: parsed.unit });
+    const result = runContext({ root, cwd: root, target, role: parsed.role, unit: parsed.unit, list: parsed.list });
     if (result.text) console.log(result.text);
     if (result.messages) for (const m of result.messages) console.error(m);
     return result.code;

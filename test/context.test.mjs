@@ -1,6 +1,8 @@
 // context 的角色切片、缺项报错、必读片段与去重。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { runContext } from '../src/context.mjs';
 import { cleanup, detailsDoc, makeTempRoot, simpleTask, stateDoc, unitBlock, writeFiles } from './helpers.mjs';
 
@@ -12,6 +14,58 @@ function titles(result) {
   return result.sources.map((s) => s.title);
 }
 
+test('无参完整输出 todo 原文且不展开链接，--list 独立枚举任务', () => {
+  const root = makeTempRoot();
+  try {
+    const body = '# 工作索引\r\n\r\n## 当前重点\r\n必读：[候选](topics/topic.md#候选)\r\n\r\n' + '保留原文。\n'.repeat(200);
+    writeFiles(root, { ...simpleTask(), ...simpleTask({ name: 'done', stage: '完成' }),
+      ...simpleTask({ name: 'cancelled', stage: '已取消' }),
+      'docs/todo.md': body, 'docs/README.md': '不应加载导航',
+      'docs/topics/topic.md': '# 主题\n## 候选\n不应展开的主题正文\n',
+      'docs/tasks/broken/details.md': '# 缺状态\n',
+    });
+    const index = run(root, { target: null });
+    assert.equal(index.code, 0);
+    assert.equal(index.text, `来源：docs/todo.md\n\n${body}\n用 context --list 查看全部未完成任务。`);
+    const list = run(root, { target: null, list: true });
+    assert.equal(list.code, 0);
+    assert.match(list.text, /demo/);
+    assert.match(list.text, /broken.*缺少 state/);
+    assert.doesNotMatch(list.text, /done|cancelled|保留原文|不应展开/);
+    assert.doesNotMatch(run(root, {}).text, /保留原文|不应加载导航|不应展开/);
+  } finally { cleanup(root); }
+});
+
+test('todo 缺失回退，空白报 1，非文件和访问失败报 2，list 不依赖 todo', () => {
+  for (const body of [null, '', ' \r\n\t', 'directory', 'bad-parent']) {
+    const root = makeTempRoot();
+    try {
+      if (body === 'directory') mkdirSync(join(root, 'docs', 'todo.md'), { recursive: true });
+      else if (body === 'bad-parent') writeFiles(root, { docs: '父路径不是目录' });
+      else if (body !== null) writeFiles(root, { 'docs/todo.md': body });
+      const result = run(root, { target: null });
+      assert.equal(result.code, body === null ? 0 : ['directory', 'bad-parent'].includes(body) ? 2 : 1);
+      if (body === null) assert.match(result.text, /当前没有未完成任务/);
+      else {
+        assert.equal(result.text, undefined);
+        assert.match(result.messages.join('\n'), /docs\/todo.md/);
+      }
+      assert.equal(run(root, { target: null, list: true }).code, 0);
+    } finally { cleanup(root); }
+  }
+});
+
+test('list 与任务和角色参数互斥，无任务的角色和单元报错', () => {
+  const root = makeTempRoot();
+  try {
+    for (const args of [
+      { list: true }, { target: null, list: true, role: 'explore' },
+      { target: null, list: true, unit: 'T1' }, { target: null, role: 'explore' },
+      { target: null, unit: 'T1' }, { target: null, role: 'implement', unit: 'T1' },
+    ]) assert.equal(run(root, args).code, 2, JSON.stringify(args));
+  } finally { cleanup(root); }
+});
+
 test('无角色只给 state.md,不展开必读', () => {
   const root = makeTempRoot();
   try {
@@ -22,13 +76,14 @@ test('无角色只给 state.md,不展开必读', () => {
     // state 的“下一步与阅读”里放一条必读,无角色时不应被展开
     writeFiles(root, {
       'docs/tasks/demo/state.md': stateDoc({ progress: '| T1 示例单元 | 已自检 | details.md 的 T1 |' })
-        .replace('继续 T1。', '继续 T1。\n必读：[目标与验收](details.md#目标与验收)'),
+        .replace('继续 T1。', '继续 T1。\n必读：[目标与验收](details.md#目标与验收)') + '\n## 额外章节\n不应输出的额外正文\n必读：[缺失](missing.md)\n',
     });
     const result = run(root, {});
     assert.equal(result.code, 0);
     assert.deepEqual(titles(result), ['当前', '进度', '下一步与阅读']);
     assert.equal(result.readings.length, 0);
     assert.ok(!result.text.includes('## 目标与验收'));
+    assert.ok(!result.text.includes('不应输出的额外正文'));
   } finally {
     cleanup(root);
   }
