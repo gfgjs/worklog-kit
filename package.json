@@ -1,0 +1,38 @@
+{
+  "name": "worklog-kit",
+  "version": "0.2.0",
+  "description": "面向个人开发者与 Agent 协作的任务中枢:任务定位与接续、按角色提取上下文、文档引用检查。",
+  "type": "module",
+  "license": "MIT",
+  "author": "gfgjs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gfgjs/worklog-kit.git"
+  },
+  "homepage": "https://github.com/gfgjs/worklog-kit#readme",
+  "bugs": {
+    "url": "https://github.com/gfgjs/worklog-kit/issues"
+  },
+  "bin": {
+    "worklog-kit": "bin/worklog.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills"
+  ],
+  "scripts": {
+    "check": "node bin/worklog.mjs check",
+    "test": "node --test test/check.test.mjs test/cli.test.mjs test/context.test.mjs test/init.test.mjs test/md.test.mjs"
+  },
+  "keywords": [
+    "documentation",
+    "governance",
+    "working-memory",
+    "tasks",
+    "context"
+  ]
+}

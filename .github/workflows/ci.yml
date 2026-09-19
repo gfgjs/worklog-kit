@@ -1,0 +1,29 @@
+# worklog-kit 自身 CI:跑本仓测试,并用本工具检查本仓现行文档。
+# 零运行期依赖,无需 npm ci,直接 node 运行。
+# 本仓自检只用默认范围(跳过 docs/history);历史材料不参与现行门禁。
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # 列出文件而不是目录或裸 glob:pwsh 不展开 glob,node 20 的 --test 也不支持 glob 参数
+      - run: node --test test/check.test.mjs test/cli.test.mjs test/context.test.mjs test/init.test.mjs test/md.test.mjs
+      - run: node bin/worklog.mjs check

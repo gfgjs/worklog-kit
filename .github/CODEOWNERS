@@ -1,0 +1,13 @@
+# 本仓 CODEOWNERS:登记各组件的维护责任人,便于按面找到对的人。
+# @gfgjs 为仓库真实账号(转公开时自占位 handle 校正,2026-07-18)。
+
+# 引擎与运行工具
+/src/ @gfgjs
+/bin/ @gfgjs
+/skills/ @gfgjs
+
+# CI 配置
+/.github/ @gfgjs
+
+# 历史档案:旧文档留档区,保持可回溯
+/docs/history/worklogs/ @gfgjs

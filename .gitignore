@@ -1,0 +1,8 @@
+node_modules/
+
+# npm pack 产物与发包 token(.npmrc 是 token 入库向量)
+*.tgz
+.npmrc
+
+# 本地敏感同步词表——真实值永不入库/导出
+.sync-blocklist.local.json
