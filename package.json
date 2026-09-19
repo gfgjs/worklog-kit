@@ -1,6 +1,6 @@
 {
   "name": "worklog-kit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "面向个人开发者与 Agent 协作的任务中枢:任务定位与接续、按角色提取上下文、文档引用检查。",
   "type": "module",
   "license": "MIT",

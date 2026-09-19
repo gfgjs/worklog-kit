@@ -101,7 +101,7 @@ Markdown 识别是够用即止的最小实现，不是通用解析器。支持�
 
 ## 实现状态
 
-三个入口已在本分支实现（入口 `bin/worklog.mjs`，包内只分发 `bin`、`src`、`skills`），零运行依赖。本分支尚未发布新版本，因此从源码运行，不要用包管理器取新功能：
+三个入口已实现（入口 `bin/worklog.mjs`，包内只分发 `bin`、`src`、`skills`），零运行依赖。已发布 npm，可全局安装后使用 `worklog-kit` 命令；从源码运行：
 
 ```bash
 node /绝对路径/worklog-kit/bin/worklog.mjs --help

@@ -2,7 +2,7 @@
 
 面向个人开发者与其 Agent 协作的**任务中枢与文档治理**工具：用两份普通 Markdown 文件承载任务的目标、执行边界、当前进度与设计，用一套可复制的 Skill 约定探索、设计、施工、验收四种角色如何读取与交接，并维护项目文档的当前落点。
 
-> 当前源码已加入项目工作索引与按需上下文，施工与完整验收完成，尚未发布新版本。状态与证据见 [任务记录](docs/tasks/2026-09-19-项目工作索引/state.md)（[验收记录](docs/tasks/2026-09-19-项目工作索引/details.md#验收记录)），全局现状见 [项目推进](docs/topics/项目推进.md)。
+> 当前版本 0.2.1：任务中枢 CLI 与项目工作索引、按需上下文均已发布。验收证据见 [任务记录](docs/tasks/2026-09-19-项目工作索引/state.md)（[验收记录](docs/tasks/2026-09-19-项目工作索引/details.md#验收记录)），全局现状见 [项目推进](docs/topics/项目推进.md)。
 
 ## 它解决什么
 
@@ -53,7 +53,7 @@ Skill 目录（`skills/worklog/`）可整体复制进任意项目：入口 [SKIL
 | `context --list` | 显式枚举全部未完成任务，与任务、角色和单元参数互斥 | 只读，不依赖 todo |
 | `check [路径]` | 检查本地 Markdown 链接与片段、任务核心格式与状态指向的单元 | 只读，不自动修复；默认范围 `docs`，跳过 `docs/history` |
 
-本分支尚未发布新版本，从源码运行，零运行依赖（Node >= 20）：
+已发布 npm（`npm install -g worklog-kit` 后使用 `worklog-kit` 命令），零运行依赖（Node >= 20）；从源码运行：
 
 ```bash
 node /path/to/worklog-kit/bin/worklog.mjs --help
