@@ -38,8 +38,7 @@ filterByTitle(items, query) 返回标题包含查询子串的条目，大小写�
 ### 依赖与前提
 无（起步单元）。
 ### 必读材料
-必读：[共同约束](details.md#共同约束)
-必读：[当前设计](details.md#当前设计)
+无（共享必读见 state.md 的「下一步与阅读」）
 源码指针（相对样例项目根 examples/title-search）：src/search.mjs
 验证指针（相对样例项目根 examples/title-search）：src/search.selftest.mjs
 ### 修改范围
@@ -59,8 +58,7 @@ src/search.mjs 的 filterByTitle 与 formatMatches，以及 src/search.selftest.
 ### 依赖与前提
 T1 已完成并自检通过；开始前按下面的必读核实 filterByTitle 的当前实现与 T1 自检结果。
 ### 必读材料
-必读：[共同约束](details.md#共同约束)
-必读：[当前设计](details.md#当前设计)
+无（共享必读见 state.md 的「下一步与阅读」）
 验证指针（相对样例项目根 examples/title-search）：test/t2-trim-and-blank.spec.mjs
 源码指针（相对样例项目根 examples/title-search）：src/search.mjs
 ### 修改范围
@@ -75,8 +73,14 @@ T1 已完成并自检通过；开始前按下面的必读核实 filterByTitle �
 改动位置、两条测试命令的实际结果、未验证项、是否有剩余边界问题。
 
 ## 执行结果
-T1：filterByTitle 与 formatMatches 已实现并自检通过；证据 = 在样例项目根下 node src/search.selftest.mjs 全绿（2026-09-19 实跑）。本样例没有界面，界面行为未验证。
-T2：未执行。预置验收测试 test/t2-trim-and-blank.spec.mjs 当前应为失败，属预期。
+
+依据：[T1 设计](details.md#t1-纯过滤函数)、[共同约束](details.md#共同约束)。后续对照在同表追加，注明适用版本与条件。
+
+| 单元·轮次 | 版本·样本·配置 | 运行证据 | 结果 | 可比条件或未验证 |
+|---|---|---|---|---|
+| T1 自检 | r1 的 T1；自检脚本内置 5 条固定条目 | 样例项目根下 `node src/search.selftest.mjs`（2026-09-19 实跑） | 通过 | T2 修改后须重跑；本结果不代表 T2 通过 |
+
+T2 未执行；预置验收测试 `test/t2-trim-and-blank.spec.mjs` 当前应失败。本样例没有界面，界面行为未验证。
 
 ## 发现与经验
 - 空值语义藏在 String() 里：undefined 与 null 会变成字面量参与匹配，返回空结果而不是报错或返回全部。这是 T2 要修的根因，已记在此处备接续。

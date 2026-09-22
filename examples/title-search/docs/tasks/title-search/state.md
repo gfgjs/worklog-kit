@@ -11,11 +11,13 @@
 ## 进度
 | 单元 | 状态 | 说明与结果 |
 |---|---|---|
-| T1 纯过滤函数 | 已自检 | details.md 的「T1 纯过滤函数」；结果见「执行结果」 |
-| T2 裁剪与空值 | 未开始 | details.md 的「T2 裁剪与空值」；预置验收测试当前应失败 |
+| T1 纯过滤函数 | 已自检 | [T1 纯过滤函数](details.md#t1-纯过滤函数)；结果见 [执行结果](details.md#执行结果) |
+| T2 裁剪与空值 | 未开始 | [T2 裁剪与空值](details.md#t2-裁剪与空值)；预置验收测试当前应失败 |
 
 ## 下一步与阅读
-执行 T2：先按下面的必读读当前设计与该单元，再动手改 src/search.mjs。
-必读：[T2 裁剪与空值](details.md#t2-裁剪与空值)
+执行 T2：先读下面的共享必读，再打开 T2 单元动手改 src/search.mjs。
+必读：[共同约束](details.md#共同约束)
+必读：[当前设计](details.md#当前设计)
+指针：[T2 裁剪与空值](details.md#t2-裁剪与空值)、[执行结果](details.md#执行结果)
 源码与验证指针（相对样例项目根 examples/title-search）：src/search.mjs、test/t2-trim-and-blank.spec.mjs
-结果证据写进 details.md 的「执行结果」；完整验收条件见「目标与验收」。
+结果写进 [执行结果](details.md#执行结果)；完整验收条件见 [目标与验收](details.md#目标与验收)。
