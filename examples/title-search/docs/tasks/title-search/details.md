@@ -25,11 +25,9 @@
 
 ## 当前设计
 方案版本：r1
-- 归一化收在 filterByTitle 内：query == null 视为空串，否则 String(query) 后裁剪前后空白，再转小写做 includes 匹配。
-- 归一化后为空串的查询返回全部条目，顺序不变。
+- 查询语义统一由 filterByTitle 决定，各调用方传原始值；T2 的空值与空白处理见 [T2 实现路径](details.md#实现路径-1)。
+- 大小写不敏感，命中条目的原有顺序保持不变。
 - 函数签名、返回值形状与既有导出不变；不新增导出，不引入依赖。
-关键理由：调用方（命令行、测试、未来的界面事件）只需传原始值，空值与空白语义在一处决定。
-被否决方案：在 src/cli.mjs 里 trim。只覆盖命令行入口，测试与其他调用方仍会踩同一个坑，故否决。
 待决定：无。最终验收方式尚未选择，属用户决定，记在「目标与验收」。
 
 ## T1 纯过滤函数
@@ -64,7 +62,7 @@ T1 已完成并自检通过；开始前按下面的必读核实 filterByTitle �
 ### 修改范围
 只改 src/search.mjs 里 filterByTitle 的查询归一化。不放宽 test/t2-trim-and-blank.spec.mjs 的期望，不改 items 数据与顺序，不改命令行参数拼装。
 ### 实现路径
-按「当前设计」r1：先判 null 与 undefined，再 String 化、裁剪空白、转小写，然后沿用既有的 includes 匹配；归一化后为空即返回全部条目。
+query == null 视为空串，否则 String 化后裁剪首尾空白，再转小写沿用 includes 匹配；归一化后为空即返回全部条目。归一化放在 filterByTitle 内；仅在 src/cli.mjs 做 trim 会漏掉测试和其他调用方，因此不采用。
 ### 最低验证
 在样例项目根 examples/title-search 下跑 node --test test/t2-trim-and-blank.spec.mjs 应全绿（当前失败即需求未实现）；再跑 node src/search.selftest.mjs 确认无回归；用 node src/cli.mjs "  readme  " 观察实际输出。
 ### 回交条件
@@ -74,13 +72,19 @@ T1 已完成并自检通过；开始前按下面的必读核实 filterByTitle �
 
 ## 执行结果
 
-依据：[T1 设计](details.md#t1-纯过滤函数)、[共同约束](details.md#共同约束)。后续对照在同表追加，注明适用版本与条件。
+### T1 结果
+
+已实现：src/search.mjs 的纯过滤与文本格式化。依据：[T1 设计](details.md#t1-纯过滤函数)、[共同约束](details.md#共同约束)。
 
 | 单元·轮次 | 版本·样本·配置 | 运行证据 | 结果 | 可比条件或未验证 |
 |---|---|---|---|---|
 | T1 自检 | r1 的 T1；自检脚本内置 5 条固定条目 | 样例项目根下 `node src/search.selftest.mjs`（2026-09-19 实跑） | 通过 | T2 修改后须重跑；本结果不代表 T2 通过 |
 
-T2 未执行；预置验收测试 `test/t2-trim-and-blank.spec.mjs` 当前应失败。本样例没有界面，界面行为未验证。
+未验证：T2 变更后的回归；既有证据不证明 T2 完成。无其他遗留问题。
+
+### T2 结果
+
+未实施；预置验收测试 `test/t2-trim-and-blank.spec.mjs` 当前应失败。实现依据见 [T2](details.md#t2-裁剪与空值) 与 [共同约束](details.md#共同约束)。本样例没有界面，界面行为未验证；最终验收方式仍待用户选择。
 
 ## 发现与经验
 - 空值语义藏在 String() 里：undefined 与 null 会变成字面量参与匹配，返回空结果而不是报错或返回全部。这是 T2 要修的根因，已记在此处备接续。

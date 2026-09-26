@@ -4,8 +4,9 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { anchorMap, makeFenceTracker, scanLinks, scanRefDefinitions, splitLines } from './lib/md.mjs';
-import { buildOutline, findChild, sectionBody, sectionText } from './lib/outline.mjs';
+import { buildOutline, findChild, findSections, sectionBody, sectionText } from './lib/outline.mjs';
 import { isDir, isFile, readText, relToRoot, resolveInRoot } from './lib/paths.mjs';
+import { utf8Bytes } from './lib/volume.mjs';
 import {
   DETAILS_REQUIRED_BY_STAGE,
   STAGES,
@@ -28,6 +29,17 @@ const UNIT_STAGES = new Set(['施工', '待验收', '完成']);
 /** 单元内这些字段必须写实,不能停在占位。 */
 const UNIT_KEY_FIELDS = new Set(['目标与验收', '实现路径', '最低验证']);
 
+/**
+ * 体积提示阈值(UTF-8 字节)。只用于提醒整理,不是合法性限制,不改变退出码。
+ */
+const VOLUME_LIMITS = { state: 4096, field: 1024, details: 8192, result: 16384 };
+/** “当前”节按字段观察正文长度;方案版本与阻塞属说明字段,只提示不判错。 */
+const STATE_FIELD_NAMES = ['目标', '阶段', '执行边界', '当前', '阻塞', '方案版本'];
+/**
+ * 字段行只认第 0 列起写的已知字段名:含冒号的正文(如 URL、续行)不会被吞成字段名,
+ * 缩进行也不算字段开头。
+ */
+const FIELD_LINE_RE = new RegExp(`^(${STATE_FIELD_NAMES.join('|')})[：:]`);
 function decode(value) {
   try {
     return decodeURIComponent(value);
@@ -112,7 +124,7 @@ function checkFile(root, absFile, issues) {
 }
 
 /** 单个任务的格式与引用检查。 */
-function checkTask(root, absDir, issues) {
+function checkTask(root, absDir, issues, warnings) {
   const relDir = relToRoot(root, absDir);
   const missing = ['state.md', 'details.md'].filter((f) => !isFile(join(absDir, f)));
   if (missing.length > 0) {
@@ -120,6 +132,7 @@ function checkTask(root, absDir, issues) {
     return;
   }
   const task = loadTask(root, absDir, relDir);
+  collectVolumeWarnings(task, warnings);
   // 检查项字段缺失直接报字段;阶段行存在但不合法才报枚举,避免同一缺失报两条
   const missingFields = missingStateFields(task.state, h2(task.state.outline, '当前'));
   for (const name of missingFields) {
@@ -172,6 +185,88 @@ function checkTask(root, absDir, issues) {
   }
 }
 
+/**
+ * 逐行切出“当前”章节的字段与正文:含冒号后的值与其后续续行,不按行数估算。
+ * 字段只从第 0 列的已知字段名开始;围栏内不新开字段,但行仍计入所在字段的长度。
+ */
+function stateFieldValues(body) {
+  const fields = [];
+  const inFence = makeFenceTracker();
+  let current = null;
+  for (const line of body.split(/\r?\n/)) {
+    const fenced = inFence(line);
+    const m = fenced ? null : FIELD_LINE_RE.exec(line);
+    if (m) {
+      current = { name: m[1], lines: [line.slice(m[0].length)] };
+      fields.push(current);
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  return fields.map((field) => {
+    const lines = field.lines.slice();
+    while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
+    return [field.name, lines.join('\n').replace(/^\s+/, '')];
+  });
+}
+
+/**
+ * 体积提示:正文过长的整理信号,单独成列,不影响 issues 与退出码。
+ * 阈值判断只针对 tasksUnder 已选中的任务与既有章节,不扩大检查范围。
+ */
+function collectVolumeWarnings(task, warnings) {
+  const stateBytes = utf8Bytes(task.state.text);
+  if (stateBytes > VOLUME_LIMITS.state) {
+    warnings.push({
+      file: task.state.relPath,
+      reason: `整体正文 ${stateBytes}B 超过 ${VOLUME_LIMITS.state}B,建议把细节移出 state,只留当前限制与索引`,
+    });
+  }
+  const current = h2(task.state.outline, '当前');
+  if (current) {
+    for (const [name, value] of stateFieldValues(sectionBody(task.state.outline, current))) {
+      const bytes = utf8Bytes(value);
+      if (bytes > VOLUME_LIMITS.field) {
+        warnings.push({
+          file: task.state.relPath,
+          reason: `“当前”字段“${name}：”正文 ${bytes}B 超过 ${VOLUME_LIMITS.field}B,建议压成一句结论或移到 details.md`,
+        });
+      }
+    }
+  }
+  for (const title of ['共同约束', '当前设计']) {
+    const hits = findSections(task.details.outline, 2, title);
+    if (hits.length !== 1) continue;
+    const bytes = utf8Bytes(sectionBody(task.details.outline, hits[0]));
+    if (bytes > VOLUME_LIMITS.details) {
+      warnings.push({
+        file: task.details.relPath,
+        reason: `“${title}”正文 ${bytes}B 超过 ${VOLUME_LIMITS.details}B,建议只留共同结论;单元专属实现移到对应 T 单元,避免形成第二套设计正文`,
+      });
+    }
+  }
+  const execResult = h2(task.details.outline, '执行结果');
+  if (execResult) {
+    const bytes = utf8Bytes(sectionBody(task.details.outline, execResult));
+    if (bytes > VOLUME_LIMITS.result) {
+      warnings.push({
+        file: task.details.relPath,
+        reason: `“执行结果”正文 ${bytes}B 超过 ${VOLUME_LIMITS.result}B,建议把详细证据移到落点,这里只留结论与指针`,
+      });
+    }
+  }
+}
+
+/** 体积提示渲染成一个独立段落:与结构、引用问题并列显示。 */
+function volumeHintLines(warnings) {
+  if (warnings.length === 0) return [];
+  return [
+    '',
+    `体积提示 ${warnings.length} 处(UTF-8 字节,非 token;阈值是整理提醒,不是合法性限制)：`,
+    ...warnings.map((w) => `- ${w.file}  ${w.reason}`),
+  ];
+}
+
 /** 范围内可直接检查的任务目录:范围内出现 docs/tasks 布局即检查,不按范围字面量挑入口。 */
 function tasksUnder(root, scopeAbs) {
   const tasksRoot = join(root, 'docs', 'tasks');
@@ -209,15 +304,19 @@ export function runCheck({ root, cwd, scope }) {
   const files = collectMarkdown(root, scopeAbs, includeHistory);
   const issues = [];
   for (const file of files) checkFile(root, file, issues);
-  for (const dir of tasksUnder(root, scopeAbs)) checkTask(root, dir, issues);
+  const warnings = [];
+  for (const dir of tasksUnder(root, scopeAbs)) checkTask(root, dir, issues, warnings);
 
+  const lines = [];
   if (issues.length === 0) {
-    return { code: 0, text: `通过：${scopeRel} 范围内 ${files.length} 个 Markdown 文件的本地引用与任务结构未发现问题(不判定语义正确)`, issues };
+    lines.push(`通过：${scopeRel} 范围内 ${files.length} 个 Markdown 文件的本地引用与任务结构未发现问题(不判定语义正确)`);
+  } else {
+    lines.push(`发现问题 ${issues.length} 处(范围：${scopeRel})：`, '');
+    for (const issue of issues) {
+      const at = issue.line ? `${issue.file}:${issue.line}` : issue.file;
+      lines.push(`- ${at}  ${issue.reason}`);
+    }
   }
-  const lines = [`发现问题 ${issues.length} 处(范围：${scopeRel})：`, ''];
-  for (const issue of issues) {
-    const at = issue.line ? `${issue.file}:${issue.line}` : issue.file;
-    lines.push(`- ${at}  ${issue.reason}`);
-  }
-  return { code: 1, text: lines.join('\n'), issues };
+  lines.push(...volumeHintLines(warnings));
+  return { code: issues.length === 0 ? 0 : 1, text: lines.join('\n'), issues, warnings };
 }

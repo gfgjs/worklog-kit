@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { anchorMap, makeFenceTracker, scanLinks } from './lib/md.mjs';
 import { buildOutline, findChild, findSections, sectionBody, sectionText } from './lib/outline.mjs';
 import { isDir, isFile, readText, relToRoot, resolveInRoot } from './lib/paths.mjs';
+import { volumeLine } from './lib/volume.mjs';
 import {
   ROLES,
   STATE_SECTIONS,
@@ -284,6 +285,7 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   lines.push(`角色：${role ?? 'state(仅状态)'}`);
   lines.push(`阶段：${task.stage ?? '未识别'}`);
   lines.push(`方案版本：${task.version ?? '无'}`);
+  lines.push(volumeLine(sources, reading.items));
   for (const src of sources) {
     lines.push('');
     lines.push('---');

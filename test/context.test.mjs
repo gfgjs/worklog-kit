@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { runContext } from '../src/context.mjs';
 import { cleanup, detailsDoc, makeTempRoot, simpleTask, stateDoc, unitBlock, writeFiles } from './helpers.mjs';
+import { volumeLine } from '../src/lib/volume.mjs';
 
 function run(root, args) {
   return runContext({ root, cwd: root, target: 'demo', role: null, unit: null, ...args });
@@ -554,4 +555,64 @@ test('缺少核心文件返回 1', () => {
   } finally {
     cleanup(root);
   }
+});
+
+test('指定任务的输出带一行正文体积摘要,按节列字节且不含输出包装', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask({
+      units: unitBlock('T1', '单元'),
+      progress: '| T1 示例单元 | 已自检 | details.md 的 T1 |',
+    }));
+    const result = run(root, { role: 'implement', unit: 'T1' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    const line = result.text.split('\n').find((l) => l.startsWith('正文体积('));
+    assert.ok(line, '应有一行体积摘要');
+    assert.match(line, /UTF-8 字节/);
+    assert.match(line, /非 token/);
+    for (const src of result.sources) {
+      const bytes = Buffer.byteLength(src.body, 'utf8');
+      assert.ok(line.includes(src.title + ' ' + bytes + 'B'), src.title + ' 的字节应按正文统计');
+    }
+    for (const src of result.sources) assert.ok(result.text.includes(src.body), src.title + ' 正文应完整保留');
+    assert.ok(result.text.includes('结构完整不代表已获准执行'));
+    assert.ok(!line.includes('来源：'));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('一层必读总量计入摘要,且无参 todo 与 --list 不加摘要', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/guide.md': '# 指南\n\n## 输入处理\n\n输入事件的约定。\n',
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
+        '继续 T1。',
+        '必读：[指南片段](../../guide.md#输入处理)',
+      ].join('\n')),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
+      'docs/todo.md': '# 工作索引',
+    });
+    const withReading = run(root, { role: 'implement', unit: 'T1' });
+    assert.equal(withReading.code, 0, withReading.messages?.join('\n'));
+    assert.equal(withReading.readings.length, 1);
+    const readBytes = Buffer.byteLength(withReading.readings[0].body, 'utf8');
+    assert.ok(withReading.text.includes('一层必读 1 段 ' + readBytes + 'B'), '摘要应含一层必读总量');
+    assert.ok(!run(root, { target: null }).text.includes('正文体积('), '无参 todo 不加摘要');
+    assert.ok(!run(root, { target: null, list: true }).text.includes('正文体积('), '--list 不加摘要');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('重名标题在摘要里用来源文件辨识', () => {
+  const sources = [
+    { title: '当前设计', relPath: 'docs/tasks/a/details.md', body: '甲' },
+    { title: '当前设计', relPath: 'docs/tasks/b/details.md', body: '乙乙' },
+  ];
+  const line = volumeLine(sources, []);
+  assert.ok(line.includes('当前设计(docs/tasks/a/details.md) 3B'), line);
+  assert.ok(line.includes('当前设计(docs/tasks/b/details.md) 6B'), line);
+  assert.equal(line.split('当前设计(').length - 1, 2, '重名时两处都带来源');
 });

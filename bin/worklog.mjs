@@ -26,11 +26,16 @@ const HELP = `worklog-kit ${pkg.version}
       任务名按 docs/tasks 下的目录名解析;也可给仓根内路径。
       不带 --role 时只输出 state.md 的当前、进度、下一步与阅读三节。
       --role 决定追加的 details.md 章节;implement 必须带 --unit。
+      指定任务时在头部给出一行正文体积摘要:所选章节按 UTF-8 字节计,含一层必读总量;
+      字节数是长度提示,不是 token,也不含来源标记与分隔行。正文本身不截断、不写文件。
 
   worklog-kit check [路径]
       检查本地 Markdown 链接与片段、任务核心格式与状态指向的单元。
       默认范围:docs,并跳过 docs/history。
       显式指定 docs/history(或其子路径)时才按历史材料检查。
+      超过体积阈值时在结果末尾给出“体积提示”(UTF-8 字节,非 token):
+      state 总正文 >4096B、当前节字段 >1024B、details 的共同约束或当前设计 >8192B、执行结果 >16384B。
+      提示只是整理信号,不进入问题列表,不影响退出码。
       退出码:0 通过;1 发现问题;2 输入或运行错误。
 
 全局:

@@ -1,6 +1,8 @@
 // check 的链接、片段、任务结构与范围行为。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runCheck } from '../src/check.mjs';
 import { cleanup, detailsDoc, makeTempRoot, simpleTask, stateDoc, unitBlock, writeFiles } from './helpers.mjs';
 
@@ -319,6 +321,92 @@ test('完整任务通过且只检查范围内的任务', () => {
     });
     assert.equal(run(root, 'docs/tasks/ok').code, 0);
     assert.equal(run(root).code, 1);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('体积提示单独成列且不影响退出码,结构问题与提示可同时显示', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc({
+        progress: '| T9 缺失 | 未开始 | 无 |',
+        extra: '目标：' + '长'.repeat(700) + '\n  续行继续' + '续'.repeat(400),
+      }),
+      'docs/tasks/demo/details.md': detailsDoc({ units: '', design: '方案版本：r1' + '\n' + '设'.repeat(3000) }),
+    });
+    const result = run(root);
+    assert.equal(result.code, 1, '结构错误仍是 1');
+    assert.ok(result.text.includes('找不到对应单元'), '结构问题照常显示');
+    assert.ok(result.warnings.length >= 2, '应有体积提示');
+    assert.ok(result.text.includes('体积提示'), '提示单独成段');
+    assert.ok(result.text.includes('非 token'));
+    assert.equal(result.issues.some((i) => i.reason.includes('超过')), false, '提示不进入 issues');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('体积提示不失败、不改文件', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask({ units: unitBlock('T1', '单元') }));
+    const before = run(root);
+    assert.equal(before.code, 0);
+    assert.equal(before.warnings.length, 0, '常规任务无提示');
+    const detailsPath = join(root, 'docs', 'tasks', 'demo', 'details.md');
+    writeFiles(root, { 'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }).replace('T1 未执行。', '结'.repeat(6000)) });
+    const after = run(root);
+    assert.equal(after.code, 0, '提示不改变退出码');
+    assert.equal(after.issues.length, 0);
+    assert.equal(after.warnings.length, 1);
+    assert.ok(after.warnings[0].reason.includes('执行结果'));
+    assert.ok(after.warnings[0].reason.includes('B'));
+    assert.equal(readFileSync(detailsPath, 'utf8'), detailsDoc({ units: unitBlock('T1', '单元') }).replace('T1 未执行。', '结'.repeat(6000)), '不写文件');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('当前节字段按已知字段名切分,值里含冒号与缩进续行都算正文', () => {
+  const root = makeTempRoot();
+  try {
+    const longValue = '目标：' + '甲'.repeat(300) + '\n' + '  说明：见 http://example.com/' + 'x'.repeat(300);
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc().replace('目标：示例目标。', longValue),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
+    });
+    const result = run(root);
+    assert.equal(result.code, 0, result.text);
+    assert.equal(result.warnings.length, 1, '只有目标字段超限');
+    assert.ok(result.warnings[0].reason.includes('“目标：”'));
+    const expected = '甲'.repeat(300) + '\n' + '  说明：见 http://example.com/' + 'x'.repeat(300);
+    assert.ok(result.warnings[0].reason.includes(String(Buffer.byteLength(expected, 'utf8')) + 'B'), '只统计冒号后的值加续行');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('围栏内字段样例不新开字段但计入正文长度,缩进行不伪装成字段', () => {
+  const root = makeTempRoot();
+  try {
+    const fenced = '当前：短。' + '\n' + '```' + '\n' + '方案版本：' + 'w'.repeat(1500) + '\n' + '```';
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc().replace('当前：T1。', fenced),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
+    });
+    const result = run(root);
+    assert.equal(result.code, 0, result.text);
+    assert.equal(result.warnings.length, 1, '围栏里的方案版本不单独成字段');
+    assert.ok(result.warnings[0].reason.includes('“当前：”'), '长度算在所在字段');
+
+    const indented = '当前：短。' + '\n' + '  目标：' + 'q'.repeat(1500);
+    writeFiles(root, { 'docs/tasks/demo/state.md': stateDoc().replace('当前：T1。', indented) });
+    const second = run(root);
+    assert.equal(second.code, 0, second.text);
+    assert.equal(second.warnings.length, 1, '缩进行不开新字段');
+    assert.ok(second.warnings[0].reason.includes('“当前：”'));
   } finally {
     cleanup(root);
   }

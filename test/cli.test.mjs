@@ -25,6 +25,11 @@ test('无参数、--help 与 --version', () => {
     assert.ok(bare.out.includes('check'));
     // 默认检查范围要在帮助里写明
     assert.ok(bare.out.includes('docs/history'));
+    // 体积摘要与体积提示的口径要写在帮助里
+    assert.ok(bare.out.includes('正文体积'));
+    assert.ok(bare.out.includes('非 token'));
+    assert.ok(bare.out.includes('4096B'));
+    assert.ok(bare.out.includes('16384B'));
     for (const flag of ['--help', '-h']) {
       assert.equal(run([flag], root).code, 0, flag);
     }
