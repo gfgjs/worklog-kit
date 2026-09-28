@@ -88,7 +88,7 @@ test('context 与 check 的退出码与输出', () => {
     const implement = run(['context', 'demo', '--role', 'implement', '--unit', 'T1'], root);
     assert.equal(implement.code, 0);
     assert.ok(implement.out.includes('## 共同约束'));
-    assert.ok(implement.out.includes('### 回传要求'));
+    assert.ok(implement.out.includes('### 当前结果'));
 
     const missingUnit = run(['context', 'demo', '--role', 'implement', '--unit', 'T9'], root);
     assert.equal(missingUnit.code, 1);

@@ -1,7 +1,7 @@
 // 任务文件解析:state.md / details.md 的必需章节、阶段与施工单元定位。
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { buildOutline, findSections, sectionBody, sectionText } from './outline.mjs';
+import { buildOutline, findChild, findSections, sectionBody, sectionText } from './outline.mjs';
 import { makeFenceTracker, splitLines } from './md.mjs';
 import { isDir, isFile, readText, resolveInRoot } from './paths.mjs';
 
@@ -9,8 +9,10 @@ export const STAGES = ['探索', '设计', '施工', '待验收', '完成', '已
 export const STATE_SECTIONS = ['当前', '进度', '下一步与阅读'];
 /** “当前”节的检查项字段;缺失判错。方案版本与阻塞属说明字段,缺失不判错。 */
 export const STATE_FIELDS = ['目标', '阶段', '执行边界', '当前'];
-export const UNIT_SECTIONS = [
-  '目标与验收',
+/** r3 施工单元的四个三级标题;顺序即输出顺序。 */
+export const UNIT_SECTIONS = ['目标与验收', '方案与范围', '依赖与必读', '当前结果'];
+/** 旧八项单元结构;需要单元材料时出现即给迁移提示,不做双轨兼容。 */
+export const LEGACY_UNIT_SECTIONS = [
   '依赖与前提',
   '必读材料',
   '修改范围',
@@ -19,6 +21,8 @@ export const UNIT_SECTIONS = [
   '回交条件',
   '回传要求',
 ];
+/** 旧全局执行结果章节名;残留正文与新单元材料混存时按迁移提示处理。 */
+export const LEGACY_RESULT_SECTION = '执行结果';
 export const ROLES = ['explore', 'design', 'implement', 'accept'];
 
 /**
@@ -28,9 +32,9 @@ export const ROLES = ['explore', 'design', 'implement', 'accept'];
 export const DETAILS_REQUIRED_BY_STAGE = {
   探索: ['目标与验收'],
   设计: ['目标与验收', '探索结果', '共同约束', '当前设计'],
-  施工: ['目标与验收', '当前设计', '执行结果'],
-  待验收: ['目标与验收', '当前设计', '执行结果'],
-  完成: ['目标与验收', '当前设计', '执行结果'],
+  施工: ['目标与验收', '共同约束', '当前设计'],
+  待验收: ['目标与验收', '共同约束', '当前设计'],
+  完成: ['目标与验收', '共同约束', '当前设计'],
   已取消: ['目标与验收'],
 };
 
@@ -47,6 +51,53 @@ export function isPlaceholder(body) {
   const first = body.trim().split(/\r?\n/)[0]?.trim() ?? '';
   if (first === '') return true;
   return PLACEHOLDER_RE.test(first);
+}
+
+/**
+ * 单元四项结构检查(共用于 context 与 check):存在、唯一,正文不得待定。
+ * “未开始;未验证”是事实,不是占位;探索与设计阶段不调用本检查。
+ * label 用单元编号(如 T1);返回可用的四项小节。同一缺失只记一条,不因结构缺失追加占位判定。
+ */
+export function checkUnitFields(details, unitItem, issues, { label = null } = {}) {
+  const id = label ?? unitItem.title;
+  const found = new Map();
+  for (const title of UNIT_SECTIONS) {
+    const hits = findChild(details.outline, unitItem, 3, title);
+    if (hits.length === 0) {
+      issues.push({ file: details.relPath, reason: `${id} 缺少小标题“${title}”` });
+    } else if (hits.length > 1) {
+      issues.push({ file: details.relPath, reason: `${id} 的小标题“${title}”重复 ${hits.length} 次` });
+    } else if (isPlaceholder(sectionBody(details.outline, hits[0]))) {
+      issues.push({ file: details.relPath, reason: `${id} 的“${title}”仍为待定或占位,不能作为现行单元材料` });
+    } else {
+      found.set(title, hits[0]);
+    }
+  }
+  return found;
+}
+
+/**
+ * 旧格式迁移提示(共用于 context 与 check):需要单元材料时,
+ * 单元里残留旧八项、或 details 仍保留全局“执行结果”正文,都明确指出,不静默忽略。
+ * 历史 references 等普通 Markdown 不属于任务结构,不在这里处理。
+ */
+export function collectLegacyIssues(details, unitItems, issues) {
+  // 枚举任意同名旧章节;h2 在重复时返回 null 会静默漏报
+  const exec = findSections(details.outline, 2, LEGACY_RESULT_SECTION);
+  if (exec.length > 0) {
+    issues.push({
+      file: details.relPath,
+      reason: `旧全局“${LEGACY_RESULT_SECTION}”章节仍在(共 ${exec.length} 处):正文迁移到各单元“当前结果”或 references,空旧节直接删除,勿与新单元材料混存`,
+    });
+  }
+  for (const item of unitItems) {
+    const old = LEGACY_UNIT_SECTIONS.filter((title) => findChild(details.outline, item, 3, title).length > 0);
+    if (old.length === 0) continue;
+    issues.push({
+      file: details.relPath,
+      reason: `${item.title} 仍是旧八项结构(${old.join('、')}):迁移为“${UNIT_SECTIONS.join('、')}”四项后才能作为现行单元材料`,
+    });
+  }
 }
 
 /** 读取单份核心文件并建立章节索引。 */

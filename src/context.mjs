@@ -9,7 +9,8 @@ import { volumeLine } from './lib/volume.mjs';
 import {
   ROLES,
   STATE_SECTIONS,
-  UNIT_SECTIONS,
+  checkUnitFields,
+  collectLegacyIssues,
   h2,
   isPlaceholder,
   listTaskDirs,
@@ -24,8 +25,10 @@ const ROLE_DETAILS = {
   explore: { required: ['目标与验收'], optional: ['探索结果', '共同约束'] },
   design: { required: ['目标与验收', '探索结果', '共同约束', '当前设计'], optional: [] },
   implement: { required: ['共同约束', '当前设计'], optional: [] },
-  accept: { required: ['目标与验收', '当前设计', '执行结果'], optional: [] },
+  accept: { required: ['目标与验收', '共同约束', '当前设计'], optional: [] },
 };
+/** 整体验收(accept 不带 unit)按单元汇集的三个小节;方案与范围属施工材料,不进验收读集。 */
+const ACCEPT_UNIT_SECTIONS = ['目标与验收', '依赖与必读', '当前结果'];
 
 const BIDU_RE = /^\s*必读\s*[：:]\s*(\S.*)$/;
 const UNIT_ID_RE = /^T\d+$/;
@@ -70,7 +73,7 @@ export function listTasks(root) {
 function collectReading(root, sources) {
   const items = [];
   const issues = [];
-  // 已选章节按文件登记行区间;片段的标题行落在某区间内即已完整出现,不重复注入
+  // 已选章节按文件登记完整行区间,用于判断必读片段是否已包含。
   const selected = new Map();
   for (const s of sources) {
     if (!selected.has(s.absPath)) selected.set(s.absPath, []);
@@ -102,14 +105,24 @@ function collectReading(root, sources) {
       const pathPart = hashAt === -1 ? raw : raw.slice(0, hashAt);
       const rawAnchor = hashAt === -1 ? '' : raw.slice(hashAt + 1);
       const anchor = rawAnchor === '' ? null : decode(rawAnchor).toLowerCase();
-      if (!/\.md$/i.test(pathPart)) {
-        issues.push({ file: src.relPath, reason: `必读只支持本地 Markdown 片段,源码等材料请用普通指针：${raw}` });
-        return;
-      }
-      const absPath = resolveInRoot(root, base, decode(pathPart));
-      if (absPath === null || !isFile(absPath)) {
-        issues.push({ file: src.relPath, reason: `必读引用无法解析：${raw}` });
-        return;
+      // 同文件 # 锚点:目标就是必读标记所在的文件;带文件路径的锚点与无锚点整份文件照旧解析
+      let absPath;
+      if (pathPart === '') {
+        if (anchor === null) {
+          issues.push({ file: src.relPath, reason: `必读目标为空,应给出文件路径或 # 锚点：${raw}` });
+          return;
+        }
+        absPath = src.absPath;
+      } else {
+        if (!/\.md$/i.test(pathPart)) {
+          issues.push({ file: src.relPath, reason: `必读只支持本地 Markdown 片段,源码等材料请用普通指针：${raw}` });
+          return;
+        }
+        absPath = resolveInRoot(root, base, decode(pathPart));
+        if (absPath === null || !isFile(absPath)) {
+          issues.push({ file: src.relPath, reason: `必读引用无法解析：${raw}` });
+          return;
+        }
       }
       const rel = relToRoot(root, absPath);
       let resolved;
@@ -128,9 +141,9 @@ function collectReading(root, sources) {
         }
         resolved = { body: sectionText(outline, hits[0]), title: hits[0].title, ...hits[0] };
       }
-      // 已在所选章节中完整出现的章节不再重复注入:片段的标题行落在所选章节的行区间内
+      // 已在所选章节中完整出现的章节不再重复注入:完整区间包含才去重
       const ranges = selected.get(absPath);
-      if (ranges && resolved.start !== undefined && ranges.some((r) => resolved.start >= r.start && resolved.start <= r.end)) return;
+      if (ranges && resolved.start !== undefined && ranges.some((r) => resolved.start >= r.start && resolved.end <= r.end)) return;
       // 同名标题的不同编号锚点是不同片段,去重按锚点而不是标题
       const key = `${absPath}#${anchor ?? ''}`;
       if (seen.has(key)) return;
@@ -190,10 +203,14 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   if (role !== null && !ROLES.includes(role)) {
     return { code: 2, messages: [`未知角色：${role}。可用角色：${ROLES.join('|')}`] };
   }
-  if (unit !== null && role !== 'implement') {
+  if (unit !== null && role !== 'implement' && role !== 'accept') {
     return {
       code: 2,
-      messages: [role === null ? '--unit 需要与 --role implement 一起使用' : `--unit 只用于 implement 角色,当前角色为 ${role}`],
+      messages: [
+        role === null
+          ? '--unit 需要与 --role implement 或 accept 一起使用'
+          : `--unit 只用于 implement 或 accept 角色,当前角色为 ${role}`,
+      ],
     };
   }
   if (unit !== null && !UNIT_ID_RE.test(unit)) {
@@ -220,7 +237,7 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   const detailsSections = requireSections(task.details.outline, task.details.relPath, roleSpec.required, 'details.md ', issues);
 
   let unitItem = null;
-  if (role === 'implement') {
+  if (role === 'implement' || (role === 'accept' && unit !== null)) {
     const hits = task.units.get(unit) ?? [];
     if (hits.length === 0) {
       issues.push({ file: task.details.relPath, reason: `details.md 缺少施工单元 ${unit}` });
@@ -228,20 +245,30 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
       issues.push({ file: task.details.relPath, reason: `施工单元 ${unit} 重复出现 ${hits.length} 次,定位不唯一` });
     } else {
       unitItem = hits[0];
-      for (const title of UNIT_SECTIONS) {
-        const found = findChild(task.details.outline, unitItem, 3, title);
-        if (found.length === 0) {
-          issues.push({ file: task.details.relPath, reason: `${unit} 缺少小标题“${title}”` });
-        } else if (found.length > 1) {
-          issues.push({ file: task.details.relPath, reason: `${unit} 的小标题“${title}”重复 ${found.length} 次` });
-        } else if (isPlaceholder(sectionBody(task.details.outline, found[0]))) {
-          issues.push({ file: task.details.relPath, reason: `${unit} 的“${title}”仍为待定或占位,不能作为施工材料` });
-        }
-      }
+      checkUnitFields(task.details, unitItem, issues, { label: unit });
     }
-    const design = h2(task.details.outline, '当前设计');
+    // 单元级取材只提示本单元旧结构与全局“执行结果”残留;其它单元的旧格式由整体验收与 check 负责
+    collectLegacyIssues(task.details, unitItem ? [unitItem] : [], issues);
+  }
+  if (role === 'accept' && unit === null) {
+    // 整体验收汇集全部单元;任一单元结构不完整都指出来,不静默截断读集
+    if (task.units.size === 0) {
+      issues.push({ file: task.details.relPath, reason: '整体验收需要至少一个施工单元,details.md 没有可验收的 T 单元' });
+    }
+    collectLegacyIssues(task.details, [...task.units.values()].flat(), issues);
+    for (const [id, hits] of task.units) {
+      if (hits.length > 1) {
+        issues.push({ file: task.details.relPath, reason: `施工单元 ${id} 重复出现 ${hits.length} 次,定位不唯一` });
+        continue;
+      }
+      checkUnitFields(task.details, hits[0], issues, { label: id });
+    }
+  }
+
+  const design = h2(task.details.outline, '当前设计');
+  if (role === 'implement' || role === 'accept') {
     if (design && isPlaceholder(sectionBody(task.details.outline, design))) {
-      issues.push({ file: task.details.relPath, reason: '“当前设计”仍为待定或尚未形成,不能交付施工材料' });
+      issues.push({ file: task.details.relPath, reason: '“当前设计”仍为待定或尚未形成,不能作为现行材料' });
     }
   }
   if (issues.length > 0) {
@@ -268,6 +295,25 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     if (hits.length === 1) sources.push(source('details', title, task.details, hits[0]));
   }
   if (unitItem) sources.push(source('unit', unitItem.title, task.details, unitItem));
+  const planPointers = [];
+  if (role === 'accept' && unit === null) {
+    for (const [id, hits] of task.units) {
+      if (hits.length !== 1) continue; // 重复与缺项已在 issues 报告
+      for (const title of ACCEPT_UNIT_SECTIONS) {
+        const found = findChild(task.details.outline, hits[0], 3, title);
+        if (found.length === 1) sources.push(source('unit', `${id} ${title}`, task.details, found[0]));
+      }
+    }
+    // 方案与范围不进整体验收读集,给每单元真实锚点指针定位;指针只指向该片段,不代表单元全文
+    const anchors = anchorMap(task.details.outline.items);
+    for (const [id, hits] of task.units) {
+      if (hits.length !== 1) continue;
+      const plan = findChild(task.details.outline, hits[0], 3, '方案与范围');
+      if (plan.length !== 1) continue;
+      const anchor = [...anchors.entries()].find(([, items]) => items.length === 1 && items[0] === plan[0])?.[0];
+      if (anchor) planPointers.push({ unit: id, pointer: `${task.details.relPath}#${anchor}` });
+    }
+  }
 
   // 无角色时只给 state.md 与阅读路径,不展开必读引用
   const reading = role === null ? { items: [], issues: [] } : collectReading(root, sources);
@@ -304,9 +350,18 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
       lines.push(item.body);
     }
   }
+  if (role === 'accept' && unit === null && planPointers.length > 0) {
+    lines.push('');
+    lines.push('---');
+    lines.push('单元方案定位（按需补读）：');
+    for (const p of planPointers) lines.push(`- ${p.unit}: ${p.pointer}`);
+  }
   lines.push('');
   lines.push('---');
   lines.push('以上为文件原文摘录,用于定位与接续;结构完整不代表已获准执行。');
+  if (role === 'accept') {
+    lines.push('验收者须按相关条件补读方案、差异与真实证据;以上摘录与摘要不能单独证明通过。');
+  }
   return { code: 0, text: lines.join('\n'), sources, readings: reading.items };
 }
 

@@ -240,7 +240,7 @@ test('施工阶段要求单元结构完整,探索阶段不要求', () => {
   try {
     writeFiles(root, {
       'docs/tasks/demo/state.md': stateDoc({ progress: '| T1 单元 | 未开始 | details.md 的 T1 |' }),
-      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 最低验证: null }) }),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 方案与范围: null }) }),
     });
     assert.equal(run(root).code, 1);
     writeFiles(root, {
@@ -253,18 +253,24 @@ test('施工阶段要求单元结构完整,探索阶段不要求', () => {
   }
 });
 
-test('关键项占位在施工阶段报错,非关键项不报', () => {
+test('四组小节占位在施工阶段报错,“无”是事实表述不报', () => {
   const root = makeTempRoot();
   try {
+    for (const [title, body] of [
+      ['目标与验收', '待定'], ['方案与范围', '待补'], ['依赖与必读', 'TBD'], ['当前结果', '<待补>'],
+    ]) {
+      writeFiles(root, {
+        'docs/tasks/demo/state.md': stateDoc({ progress: '| T1 单元 | 未开始 | details.md 的 T1 |' }),
+        'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { [title]: body }) }),
+      });
+      const result = run(root);
+      assert.equal(result.code, 1, title + ' 占位应报错');
+      assert.ok(result.text.includes(title) && result.text.includes('占位'), title + ' 应指明问题小节');
+    }
     writeFiles(root, {
-      'docs/tasks/demo/state.md': stateDoc({ progress: '| T1 单元 | 未开始 | details.md 的 T1 |' }),
-      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 实现路径: '待定' }) }),
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 方案与范围: '无', 依赖与必读: '无' }) }),
     });
-    assert.equal(run(root).code, 1);
-    writeFiles(root, {
-      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 依赖与前提: '待定' }) }),
-    });
-    assert.equal(run(root).code, 0);
+    assert.equal(run(root).code, 0, '“无”是事实表述,不是占位');
   } finally {
     cleanup(root);
   }
@@ -356,14 +362,15 @@ test('体积提示不失败、不改文件', () => {
     assert.equal(before.code, 0);
     assert.equal(before.warnings.length, 0, '常规任务无提示');
     const detailsPath = join(root, 'docs', 'tasks', 'demo', 'details.md');
-    writeFiles(root, { 'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }).replace('T1 未执行。', '结'.repeat(6000)) });
+    const bloated = detailsDoc({ units: unitBlock('T1', '单元', { 当前结果: '结'.repeat(6000) }) });
+    writeFiles(root, { 'docs/tasks/demo/details.md': bloated });
     const after = run(root);
     assert.equal(after.code, 0, '提示不改变退出码');
     assert.equal(after.issues.length, 0);
-    assert.equal(after.warnings.length, 1);
-    assert.ok(after.warnings[0].reason.includes('执行结果'));
-    assert.ok(after.warnings[0].reason.includes('B'));
-    assert.equal(readFileSync(detailsPath, 'utf8'), detailsDoc({ units: unitBlock('T1', '单元') }).replace('T1 未执行。', '结'.repeat(6000)), '不写文件');
+    assert.equal(after.warnings.length, 2, '“当前结果”与单元整体各一条提示');
+    assert.ok(after.warnings.some((w) => w.reason.includes('当前结果') && w.reason.includes('1024B')));
+    assert.ok(after.warnings.some((w) => w.reason.includes('单元 T1 正文') && w.reason.includes('16384B')));
+    assert.equal(readFileSync(detailsPath, 'utf8'), bloated, '不写文件');
   } finally {
     cleanup(root);
   }

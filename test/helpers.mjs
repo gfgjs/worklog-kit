@@ -22,13 +22,9 @@ export function cleanup(root) {
 
 const UNIT_FIELDS = {
   目标与验收: '完成后行为可验证。',
-  依赖与前提: '无。',
-  必读材料: '必读：[共同约束](details.md#共同约束)',
-  修改范围: 'src/a.mjs。',
-  实现路径: '按当前设计实现。',
-  最低验证: 'node --test test/a.spec.mjs。',
-  回交条件: '接口需要变更时回交。',
-  回传要求: '改动位置与验证结果。',
+  方案与范围: 'src/a.mjs。',
+  依赖与必读: '必读：[共同约束](details.md#共同约束)',
+  当前结果: '尚未开始；未验证。',
 };
 
 /** 生成一个完整的施工单元;overrides 里给 null 表示省略该小标题。 */
@@ -84,9 +80,6 @@ export function detailsDoc({ units = '', design = '方案版本：r1\n按方案�
     '',
     units,
     extraSections,
-    '## 执行结果',
-    'T1 未执行。',
-    '',
   ].join('\n');
 }
 

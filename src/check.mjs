@@ -11,7 +11,8 @@ import {
   DETAILS_REQUIRED_BY_STAGE,
   STAGES,
   STATE_SECTIONS,
-  UNIT_SECTIONS,
+  checkUnitFields,
+  collectLegacyIssues,
   h2,
   isPlaceholder,
   listTaskDirs,
@@ -26,13 +27,11 @@ const EXTERNAL_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
 const HISTORY_REL = 'docs/history';
 /** 需要可执行施工单元的阶段;探索与设计允许尚无单元。 */
 const UNIT_STAGES = new Set(['施工', '待验收', '完成']);
-/** 单元内这些字段必须写实,不能停在占位。 */
-const UNIT_KEY_FIELDS = new Set(['目标与验收', '实现路径', '最低验证']);
 
 /**
  * 体积提示阈值(UTF-8 字节)。只用于提醒整理,不是合法性限制,不改变退出码。
  */
-const VOLUME_LIMITS = { state: 4096, field: 1024, details: 8192, result: 16384 };
+const VOLUME_LIMITS = { state: 4096, field: 1024, details: 8192, unit: 16384 };
 /** “当前”节按字段观察正文长度;方案版本与阻塞属说明字段,只提示不判错。 */
 const STATE_FIELD_NAMES = ['目标', '阶段', '执行边界', '当前', '阻塞', '方案版本'];
 /**
@@ -163,18 +162,11 @@ function checkTask(root, absDir, issues, warnings) {
 
   // 只有在需要可执行单元的阶段才要求单元结构完整
   if (needsUnits) {
+    // 现行材料阶段出现旧八项或全局“执行结果”时给迁移提示,并入同一问题列表
+    collectLegacyIssues(task.details, [...task.units.values()].filter((h) => h.length === 1).map((h) => h[0]), issues);
     for (const [id, hits] of task.units) {
       if (hits.length > 1) continue; // 重复已在上文报告
-      for (const title of UNIT_SECTIONS) {
-        const found = findChild(task.details.outline, hits[0], 3, title);
-        if (found.length === 0) {
-          issues.push({ file: task.details.relPath, reason: `${id} 缺少小标题“${title}”` });
-        } else if (found.length > 1) {
-          issues.push({ file: task.details.relPath, reason: `${id} 的小标题“${title}”重复 ${found.length} 次` });
-        } else if (UNIT_KEY_FIELDS.has(title) && isPlaceholder(sectionBody(task.details.outline, found[0]))) {
-          issues.push({ file: task.details.relPath, reason: `${id} 的“${title}”仍为待定或占位` });
-        }
-      }
+      checkUnitFields(task.details, hits[0], issues, { label: id });
     }
   }
 
@@ -245,14 +237,25 @@ function collectVolumeWarnings(task, warnings) {
       });
     }
   }
-  const execResult = h2(task.details.outline, '执行结果');
-  if (execResult) {
-    const bytes = utf8Bytes(sectionBody(task.details.outline, execResult));
-    if (bytes > VOLUME_LIMITS.result) {
+  // 体积提示按现行单元观察:共享章节、每个单元与其“当前结果”分开计
+  for (const [id, hits] of task.units) {
+    if (hits.length !== 1) continue;
+    const unitBytes = utf8Bytes(sectionText(task.details.outline, hits[0]));
+    if (unitBytes > VOLUME_LIMITS.unit) {
       warnings.push({
         file: task.details.relPath,
-        reason: `“执行结果”正文 ${bytes}B 超过 ${VOLUME_LIMITS.result}B,建议把详细证据移到落点,这里只留结论与指针`,
+        reason: `单元 ${id} 正文 ${unitBytes}B 超过 ${VOLUME_LIMITS.unit}B,建议把过程证据移到 references,单元内只留结论与指针`,
       });
+    }
+    const resultSec = findChild(task.details.outline, hits[0], 3, '当前结果');
+    if (resultSec.length === 1) {
+      const bytes = utf8Bytes(sectionBody(task.details.outline, resultSec[0]));
+      if (bytes > VOLUME_LIMITS.field) {
+        warnings.push({
+          file: task.details.relPath,
+          reason: `单元 ${id} 的“当前结果”正文 ${bytes}B 超过 ${VOLUME_LIMITS.field}B,建议只留结论、适用版本与环境,详细证据落到 references`,
+        });
+      }
     }
   }
 }

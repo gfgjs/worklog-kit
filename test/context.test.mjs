@@ -1,9 +1,10 @@
 // context 的角色切片、缺项报错、必读片段与去重。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runContext } from '../src/context.mjs';
+import { runCheck } from '../src/check.mjs';
 import { cleanup, detailsDoc, makeTempRoot, simpleTask, stateDoc, unitBlock, writeFiles } from './helpers.mjs';
 import { volumeLine } from '../src/lib/volume.mjs';
 
@@ -101,8 +102,14 @@ test('各角色读集符合约定', () => {
     assert.deepEqual(titles(design), ['当前', '进度', '下一步与阅读', '目标与验收', '探索结果', '共同约束', '当前设计']);
     const implement = run(root, { role: 'implement', unit: 'T1' });
     assert.deepEqual(titles(implement), ['当前', '进度', '下一步与阅读', '共同约束', '当前设计', 'T1 示例单元']);
+    // accept 带 unit:共享目标与验收 + 共同约束与当前设计 + 完整单元
+    const acceptUnit = run(root, { role: 'accept', unit: 'T1' });
+    assert.deepEqual(titles(acceptUnit), ['当前', '进度', '下一步与阅读', '目标与验收', '共同约束', '当前设计', 'T1 示例单元']);
+    // 整体验收:共享读集 + 每单元三个小节;方案与范围只给真实锚点指针,不注入方案正文
     const accept = run(root, { role: 'accept' });
-    assert.deepEqual(titles(accept), ['当前', '进度', '下一步与阅读', '目标与验收', '当前设计', '执行结果']);
+    assert.deepEqual(titles(accept), ['当前', '进度', '下一步与阅读', '目标与验收', '共同约束', '当前设计', 'T1 目标与验收', 'T1 依赖与必读', 'T1 当前结果']);
+    assert.ok(accept.text.includes('T1: docs/tasks/demo/details.md#方案与范围'), '方案与范围给真实锚点指针');
+    assert.ok(!accept.text.includes('### 方案与范围'), '方案正文不注入整体验收');
   } finally {
     cleanup(root);
   }
@@ -138,11 +145,12 @@ test('设计角色缺少当前设计时报缺项', () => {
   }
 });
 
-test('施工角色缺小标题、重复与占位都报错', () => {
+test('施工角色缺小标题、旧结构残留、重复与占位都报错', () => {
   const cases = [
-    { name: '缺小标题', units: unitBlock('T1', '单元', { 最低验证: null }), expect: '最低验证' },
-    { name: '占位', units: unitBlock('T1', '单元', { 实现路径: '待定' }), expect: '待定' },
-    { name: '尖括号占位', units: unitBlock('T1', '单元', { 实现路径: '<待补>' }), expect: '待定或占位' },
+    { name: '缺小标题', units: unitBlock('T1', '单元', { 方案与范围: null }), expect: '方案与范围' },
+    { name: '占位', units: unitBlock('T1', '单元', { 当前结果: '待定' }), expect: '待定' },
+    { name: '尖括号占位', units: unitBlock('T1', '单元', { 目标与验收: '<待补>' }), expect: '待定或占位' },
+    { name: '旧八项残留', units: unitBlock('T1', '单元') + '\n### 最低验证\n旧验证正文。\n', expect: '旧八项结构' },
     { name: '重复小标题', units: unitBlock('T1', '单元') + '\n### 目标与验收\n重复一份。\n', expect: '重复' },
   ];
   for (const item of cases) {
@@ -158,16 +166,16 @@ test('施工角色缺小标题、重复与占位都报错', () => {
   }
 });
 
-test('“待决定：无”与回交条件里的“待定”字样不拦施工', () => {
+test('正文后部的“待定”字样与“待决定：无”不拦施工', () => {
   const root = makeTempRoot();
   try {
     writeFiles(root, simpleTask({
-      units: unitBlock('T1', '单元', { 回交条件: '若设计前提待定,停止并回传;其余自行处理。' }),
+      units: unitBlock('T1', '单元', { 方案与范围: '若设计前提待定,停止并回传;其余自行处理。' }),
     }));
     writeFiles(root, {
       'docs/tasks/demo/details.md': detailsDoc({
         design: '方案版本：r1\n按方案实现。\n待决定：无。',
-        units: unitBlock('T1', '单元', { 回交条件: '若设计前提待定,停止并回传。' }),
+        units: unitBlock('T1', '单元', { 方案与范围: '若设计前提待定,停止并回传。' }),
       }),
     });
     const result = run(root, { role: 'implement', unit: 'T1' });
@@ -181,7 +189,7 @@ test('“无”作为空项写法不被判为占位', () => {
   const root = makeTempRoot();
   try {
     writeFiles(root, simpleTask({
-      units: unitBlock('T1', '单元', { 依赖与前提: '无', 必读材料: '无', 回交条件: '无' }),
+      units: unitBlock('T1', '单元', { 方案与范围: '无', 依赖与必读: '无' }),
     }));
     const result = run(root, { role: 'implement', unit: 'T1' });
     assert.equal(result.code, 0, result.messages?.join('\n'));
@@ -270,22 +278,26 @@ test('同名标题的编号锚点与 check 用同一套规则解析', () => {
   }
 });
 
-test('必读指向所选章节内的同名片段不被标题去重误伤', () => {
+test('必读指向未覆盖的共享片段仍注入,已覆盖的单元内片段不重复', () => {
   const root = makeTempRoot();
   try {
     // details.md 顶层“目标与验收”与 T1 单元内“目标与验收”同名;
-    // 必读指向单元内那处(编号锚点),不得被顶层同名章节吞掉
-    writeFiles(root, {
-      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
-        '继续 T1。',
-        '必读：[单元验收](details.md#目标与验收-1)',
-      ].join('\n')),
-      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 目标与验收: '单元验收正文。' }) }),
-    });
-    const result = run(root, { role: 'accept' });
+    // 必读指向顶层(#目标与验收)未被 implement 选入,应注入;
+    // 指向单元内那处(#目标与验收-1)已随完整单元注入,应去重
+    writeFiles(root, simpleTask({
+      units: unitBlock('T1', '单元', {
+        目标与验收: '单元验收正文。',
+        依赖与必读: [
+          '必读：[总目标](details.md#目标与验收)',
+          '必读：[单元验收](details.md#目标与验收-1)',
+        ].join('\n'),
+      }),
+    }));
+    const result = run(root, { role: 'implement', unit: 'T1' });
     assert.equal(result.code, 0, result.messages?.join('\n'));
-    const unitReading = result.readings.find((r) => r.body.includes('单元验收正文'));
-    assert.ok(unitReading, '单元内的“目标与验收”片段应作为必读注入');
+    assert.equal(result.readings.length, 1, '顶层共享片段注入,单元内已覆盖片段去重');
+    assert.ok(result.readings[0].body.includes('需求与验收条件'), '注入的是顶层共享片段');
+    assert.equal((result.text.match(/^### 目标与验收$/gm) ?? []).length, 1, '单元内片段不重复出现');
   } finally {
     cleanup(root);
   }
@@ -294,19 +306,182 @@ test('必读指向所选章节内的同名片段不被标题去重误伤', () =>
 test('必读指向已注入单元内的小节不重复注入', () => {
   const root = makeTempRoot();
   try {
-    // implement 角色已注入 T1 单元全文,其中含“### 修改范围”;
-    // 必读指向该小节时,其标题行落在所选单元的行区间内,应跳过
-    writeFiles(root, {
-      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
-        '继续 T1。',
-        '必读：[修改范围](details.md#修改范围)',
-      ].join('\n')),
-      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元', { 修改范围: '单元修改范围正文。' }) }),
-    });
+    // implement 已注入 T1 单元全文,其中含“### 方案与范围”;
+    // 必读用同文件锚点指向该小节时,其区间已被完整覆盖,应去重
+    writeFiles(root, simpleTask({
+      units: unitBlock('T1', '单元', {
+        依赖与必读: '必读：[方案](#方案与范围)',
+      }),
+    }));
     const result = run(root, { role: 'implement', unit: 'T1' });
     assert.equal(result.code, 0, result.messages?.join('\n'));
     assert.equal(result.readings.length, 0, '单元内片段已完整出现,不应再注入');
-    assert.equal(result.text.split('### 修改范围').length - 1, 1);
+    assert.equal((result.text.match(/^### 方案与范围$/gm) ?? []).length, 1);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('无关单元与历史材料增长不改变指定单元读集', () => {
+  const root = makeTempRoot();
+  try {
+    const evidenceBody = '# 证据\n\n## 记录\n\nT1 的过程证据正文。\n';
+    const resultLine = '实现完成;证据见 [证据](references/evidence.md#记录)。';
+    writeFiles(root, {
+      ...simpleTask({ units: unitBlock('T1', '示例单元', { 当前结果: resultLine })
+        + '\n' + unitBlock('T2', '无关单元') }),
+      'docs/tasks/demo/references/evidence.md': evidenceBody,
+    });
+    const beforeImpl = run(root, { role: 'implement', unit: 'T1' });
+    const beforeAcc = run(root, { role: 'accept', unit: 'T1' });
+    assert.equal(beforeImpl.code, 0, beforeImpl.messages?.join('\n'));
+    assert.equal(beforeAcc.code, 0, beforeAcc.messages?.join('\n'));
+    writeFiles(root, {
+      'docs/tasks/demo/details.md': detailsDoc({
+        units: unitBlock('T1', '示例单元', { 当前结果: resultLine }) + '\n'
+          + unitBlock('T2', '无关单元', { 当前结果: 'T2 已自检。' + '增'.repeat(2000) }),
+      }),
+      'docs/history/note.md': '# 历史笔记\n\n## 旧结论\n\n历史结论正文。\n',
+      'docs/tasks/demo/references/evidence.md': evidenceBody + '新增过程证据。'.repeat(2000),
+    });
+    const afterImpl = run(root, { role: 'implement', unit: 'T1' });
+    const afterAcc = run(root, { role: 'accept', unit: 'T1' });
+    assert.equal(afterImpl.code, 0, afterImpl.messages?.join('\n'));
+    assert.equal(afterAcc.code, 0, afterAcc.messages?.join('\n'));
+    assert.equal(afterImpl.text, beforeImpl.text, 'implement T1 输出应与增长前逐字一致');
+    assert.equal(afterAcc.text, beforeAcc.text, 'accept T1 输出应与增长前逐字一致');
+    assert.ok(!afterImpl.text.includes('T2 已自检'));
+    assert.ok(!afterImpl.text.includes('历史结论正文'));
+    const check = runCheck({ root, cwd: root, scope: 'docs/tasks/demo' });
+    assert.equal(check.code, 0, check.text);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('设计修订后旧证据仍可达,不误标新通过', () => {
+  const root = makeTempRoot();
+  try {
+    const evidenceLink = '证据见 [证据](references/evidence.md#记录)。';
+    const evidencePath = join(root, 'docs', 'tasks', 'demo', 'references', 'evidence.md');
+    const evidenceDoc = '# 证据\n\n## 记录\n\nr1 阶段的失败与通过证据正文。\n';
+    writeFiles(root, {
+      ...simpleTask({ stage: '待验收', units: unitBlock('T1', '示例单元', {
+        当前结果: '适用 r1;' + evidenceLink + '旧失败/通过证据仅证明 r1 阶段事实。',
+      }) }),
+      'docs/tasks/demo/references/evidence.md': evidenceDoc,
+    });
+    // 设计修订:方案版本升为 r2,单元结果显式限定适用范围,证据文件原样保留
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc({
+        stage: '施工',
+        progress: '| T1 示例单元 | 待处理 | details.md 的 T1 |',
+      }).replace('方案版本：r1', '方案版本：r2'),
+      'docs/tasks/demo/details.md': detailsDoc({
+        design: '方案版本：r2\n修订后的设计。',
+        units: unitBlock('T1', '示例单元', {
+          当前结果: 'r2 尚未验证;r1 结果只适用 r1;' + evidenceLink,
+        }),
+      }),
+    });
+    const acceptUnit = run(root, { role: 'accept', unit: 'T1' });
+    assert.equal(acceptUnit.code, 0, acceptUnit.messages?.join('\n'));
+    assert.ok(acceptUnit.text.includes('r2 尚未验证'), '输出保留 r2 未验证事实');
+    assert.ok(acceptUnit.text.includes('r1 结果只适用 r1'), '输出保留 r1 适用限定');
+    assert.equal(acceptUnit.readings.length, 0, '普通证据链接不注入旧证据正文');
+    assert.ok(acceptUnit.text.includes('结构完整不代表已获准执行'), '修订不改变摘录性质');
+    const acceptAll = run(root, { role: 'accept' });
+    assert.equal(acceptAll.code, 0, acceptAll.messages?.join('\n'));
+    const resultSrc = acceptAll.sources.find((s) => s.title === 'T1 当前结果');
+    assert.ok(resultSrc?.body.includes('r2 尚未验证') && resultSrc.body.includes('r1 结果只适用 r1'), '单元“当前结果”保留两条限定');
+    assert.ok(acceptAll.text.includes('T1: docs/tasks/demo/details.md#方案与范围'), '方案指针在修订后仍可达');
+    const check = runCheck({ root, cwd: root, scope: 'docs/tasks/demo' });
+    assert.equal(check.code, 0, check.text);
+    assert.equal(readFileSync(evidencePath, 'utf8'), evidenceDoc, '旧证据正文未被改写');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('单元外全局执行结果残留:四类入口均报迁移提示,无角色仍可读', () => {
+  const root = makeTempRoot();
+  try {
+    const units = () => unitBlock('T1', '示例单元', { 当前结果: 'T1 已自检。' });
+    writeFiles(root, simpleTask({ stage: '待验收', units: units() }));
+    const seeds = [
+      '## 执行结果\n\nr1 全局结果正文。\n',
+      '## 执行结果\n',
+      '## 执行结果\n\n旧结果甲。\n\n## 执行结果\n\n旧结果乙。\n',
+    ];
+    for (const [i, legacy] of seeds.entries()) {
+      writeFiles(root, {
+        'docs/tasks/demo/details.md': detailsDoc({ units: units(), extraSections: legacy }),
+      });
+      const impl = run(root, { role: 'implement', unit: 'T1' });
+      assert.equal(impl.code, 1, 'implement T1 应拒绝旧全局执行结果(用例 ' + i + ')');
+      assert.ok(impl.messages.join('\n').includes('执行结果'), 'implement 应给迁移提示(用例 ' + i + ')');
+      const accUnit = run(root, { role: 'accept', unit: 'T1' });
+      assert.equal(accUnit.code, 1);
+      assert.ok(accUnit.messages.join('\n').includes('执行结果'));
+      const accAll = run(root, { role: 'accept' });
+      assert.equal(accAll.code, 1);
+      assert.ok(accAll.messages.join('\n').includes('执行结果'));
+      const check = runCheck({ root, cwd: root, scope: 'docs/tasks/demo' });
+      assert.equal(check.code, 1);
+      assert.ok(check.text.includes('执行结果'));
+      const plain = run(root, {});
+      assert.equal(plain.code, 0, '无角色读 state 不受旧残留影响');
+      assert.ok(plain.text.includes('## 当前'));
+    }
+    // 同一测试顺带覆盖:accept 空单元与设计待定均拒绝
+    writeFiles(root, { 'docs/tasks/demo/details.md': detailsDoc({ units: '' }) });
+    const empty = run(root, { role: 'accept' });
+    assert.equal(empty.code, 1);
+    assert.ok(empty.messages.join('\n').includes('至少一个施工单元'));
+    writeFiles(root, { 'docs/tasks/demo/details.md': detailsDoc({ design: '待定', units: units() }) });
+    const pending = run(root, { role: 'accept', unit: 'T1' });
+    assert.equal(pending.code, 1);
+    assert.ok(pending.messages.join('\n').includes('当前设计'));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('共享片段里的必读仍注入,指向同一片段时去重', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/guide.md': '# 指南\n\n## 输入处理\n\n输入事件的约定。\n',
+      ...simpleTask(),
+    });
+    writeFiles(root, {
+      'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') })
+        .replace('零依赖,Node >= 20。', '零依赖,Node >= 20。\n必读：[约束必读](../../guide.md#输入处理)')
+        .replace('按方案实现。', '按方案实现。\n必读：[设计必读](../../guide.md#输入处理)'),
+    });
+    const result = run(root, { role: 'implement', unit: 'T1' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.equal(result.readings.length, 1, '两处共享片段的必读指向同一片段,只注入一次');
+    assert.ok(result.readings[0].body.includes('输入事件的约定'));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('整体accept同文件锚点:父单元完整展开,已含子段不重复', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask({
+      units: unitBlock('T1', '示例单元', {
+        依赖与必读: '必读：[本单元](#t1-示例单元)\n必读：[本单元结果](#当前结果)',
+      }),
+    }));
+    const result = run(root, { role: 'accept' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    const whole = result.readings.find((r) => r.target === '#t1-示例单元');
+    assert.ok(whole, '整体验收只选三小节,指向父单元的必读应完整展开');
+    assert.ok(whole.body.includes('### 方案与范围'), '父单元展开应含方案小节');
+    assert.equal(result.readings.length, 1, '已选子段“当前结果”去重,只注入父单元一份');
   } finally {
     cleanup(root);
   }
