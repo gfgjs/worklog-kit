@@ -24,7 +24,9 @@ const HELP = `worklog-kit ${pkg.version}
       无参数时输出 docs/todo.md 原文;缺失时回退未完成任务列表。
       --list 显式列出全部未完成任务,与任务、--role、--unit 互斥。
       任务名按 docs/tasks 下的目录名解析;也可给仓根内路径。
-      不带 --role 时只输出 state.md 的当前、进度、下一步与阅读三节。
+      不带 --role 和 --unit 时只输出 state.md 的当前、进度、下一步与阅读三节。
+      仅带 --unit 时补读该单元全文及其一层必读,不自动输出共享章节。
+      已有共享材料直接复用;需要完整角色材料时用 --role,仅缺少或变更部分材料时按章节补读。
       --role 决定追加的 details.md 章节;implement 必须带 --unit,accept 可带 --unit。
       施工与验收按现行单元取材:单元为四个三级标题(目标与验收/方案与范围/依赖与必读/当前结果),
       保留旧八项或全局“执行结果”章节时给迁移提示;历史 references 仍作为普通 Markdown 阅读。

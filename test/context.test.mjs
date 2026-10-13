@@ -68,7 +68,7 @@ test('list 与任务和角色参数互斥，无任务的角色和单元报错', 
   } finally { cleanup(root); }
 });
 
-test('无角色只给 state.md,不展开必读', () => {
+test('无角色和单元只给 state.md,不展开必读', () => {
   const root = makeTempRoot();
   try {
     writeFiles(root, simpleTask({
@@ -89,6 +89,97 @@ test('无角色只给 state.md,不展开必读', () => {
   } finally {
     cleanup(root);
   }
+});
+
+test('单元补读只输出单元四组正文，未选章节及历史增长不改变读集', () => {
+  const root = makeTempRoot();
+  try {
+    const selected = unitBlock('T2', '当前单元', {
+      目标与验收: '当前单元验收。',
+      方案与范围: '当前单元方案。',
+      依赖与必读: '无。',
+      当前结果: '当前单元结果。',
+    });
+    const details = (history) => detailsDoc({
+      design: '方案版本：r1\n共享设计正文。\n必读：[未选共享必读](missing-shared.md)',
+      units: unitBlock('T1', '历史单元', { 当前结果: history }) + '\n' + selected,
+    });
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', '状态独有正文。\n必读：[未选状态必读](missing-state.md)'),
+      'docs/tasks/demo/details.md': details('历史单元原结果。'),
+    });
+    const before = run(root, { unit: 'T2' });
+    assert.equal(before.code, 0, before.messages?.join('\n'));
+    assert.deepEqual(titles(before), ['T2 当前单元']);
+    assert.equal(before.readings.length, 0);
+    assert.equal(before.sources[0].body, selected.trimEnd());
+    assert.match(before.text, /任务：demo\n来源目录：docs\/tasks\/demo\n模式：单元补读\(T2\)\n阶段：施工\n方案版本：r1/);
+    assert.match(before.text, /来源：docs\/tasks\/demo\/details.md 的“T2 当前单元”/);
+    assert.ok(before.text.includes(`T2 当前单元 ${Buffer.byteLength(selected.trimEnd(), 'utf8')}B`));
+    assert.doesNotMatch(before.text, /状态独有正文|共享设计正文|历史单元|## 当前\n|## 进度|## 下一步与阅读/);
+    writeFiles(root, { 'docs/tasks/demo/details.md': details('历史单元增长正文。\n'.repeat(500)) });
+    assert.equal(run(root, { unit: 'T2' }).text, before.text);
+  } finally { cleanup(root); }
+});
+
+test('单元补读从四组正文收集一层必读，保留来源并去重及展开显式共享链接', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      'docs/guide.md': '# 指南\n\n## 要点\n指南正文。\n必读：[第二层](missing-guide.md)\n\n## 其他\n无关指南正文。\n',
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', '必读：[未选状态必读](missing-state.md)'),
+      'docs/tasks/demo/details.md': detailsDoc({
+        design: '方案版本：r1\n显式共享正文。\n必读：[第二层](missing-shared.md)',
+        units: unitBlock('T2', '当前单元', {
+          目标与验收: '完成后行为可验证。\n必读：[共享设计](#当前设计)',
+          方案与范围: '本单元方案。\n必读：[共享设计重复](details.md#当前设计)',
+          依赖与必读: '必读：[本单元验收](#目标与验收-1)\n必读：[指南](../../guide.md#要点)',
+          当前结果: '尚未开始；未验证。\n必读：[指南重复](../../guide.md#要点)\n[普通历史指针](missing-history.md)',
+        }),
+      }),
+    });
+    const result = run(root, { unit: 'T2' });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.deepEqual(titles(result), ['T2 当前单元']);
+    assert.deepEqual(result.readings.map(({ source, target, rel }) => ({ source, target, rel })), [
+      { source: 'docs/tasks/demo/details.md', target: '#当前设计', rel: 'docs/tasks/demo/details.md' },
+      { source: 'docs/tasks/demo/details.md', target: '../../guide.md#要点', rel: 'docs/guide.md' },
+    ]);
+    assert.equal((result.text.match(/^### 目标与验收$/gm) ?? []).length, 1);
+    assert.equal((result.text.match(/^## 当前设计$/gm) ?? []).length, 1);
+    assert.match(result.text, /来源：docs\/tasks\/demo\/details.md → #当前设计/);
+    assert.match(result.text, /来源：docs\/tasks\/demo\/details.md → ..\/..\/guide.md#要点/);
+    assert.match(result.text, /显式共享正文/);
+    assert.doesNotMatch(result.text, /未选状态必读|无关指南正文/);
+    const readingBytes = result.readings.reduce((total, item) => total + Buffer.byteLength(item.body, 'utf8'), 0);
+    assert.ok(result.text.includes(`一层必读 2 段 ${readingBytes}B`));
+  } finally { cleanup(root); }
+});
+
+test('单元补读的非法编号、缺失、重复、四项结构及所选必读错误均不输出材料', () => {
+  const root = makeTempRoot();
+  try {
+    const cases = [
+      { unit: 'X2', units: unitBlock('T2', '单元'), code: 2, expect: /编号格式/ },
+      { unit: 'T9', units: unitBlock('T2', '单元'), code: 1, expect: /缺少施工单元 T9/ },
+      { unit: 'T2', units: unitBlock('T2', '单元') + '\n' + unitBlock('T2', '重复单元'), code: 1, expect: /定位不唯一/ },
+      ...['目标与验收', '方案与范围', '依赖与必读', '当前结果'].map((field) => ({
+        unit: 'T2', units: unitBlock('T2', '单元', { [field]: null }), code: 1, expect: new RegExp(field),
+      })),
+      { unit: 'T2', units: unitBlock('T2', '单元', { 当前结果: '待定' }), code: 1, expect: /待定/ },
+      { unit: 'T2', units: unitBlock('T2', '单元') + '\n### 当前结果\n重复。', code: 1, expect: /重复/ },
+      { unit: 'T2', units: unitBlock('T2', '单元', { 依赖与必读: '必读：[缺失](missing.md)' }), code: 1, expect: /无法解析/ },
+      { unit: 'T2', units: unitBlock('T2', '单元', { 依赖与必读: '必读：[缺失片段](#缺失)' }), code: 1, expect: /片段不存在/ },
+    ];
+    for (const { unit, units, code, expect } of cases) {
+      writeFiles(root, simpleTask({ units }));
+      const result = run(root, { unit });
+      assert.equal(result.code, code);
+      assert.equal(result.text, undefined);
+      assert.equal(result.sources, undefined);
+      assert.match(result.messages.join('\n'), expect);
+    }
+  } finally { cleanup(root); }
 });
 
 test('各角色读集符合约定', () => {
@@ -706,7 +797,7 @@ test('输入错误返回 2', () => {
   try {
     writeFiles(root, simpleTask());
     assert.equal(run(root, { role: 'nope' }).code, 2);
-    assert.equal(run(root, { unit: 'T1' }).code, 2);
+    assert.equal(run(root, { unit: 'X1' }).code, 2);
     assert.equal(run(root, { role: 'explore', unit: 'T1' }).code, 2);
     assert.equal(run(root, { role: 'implement' }).code, 2);
     assert.equal(run(root, { role: 'implement', unit: 'X1' }).code, 2);

@@ -203,14 +203,10 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   if (role !== null && !ROLES.includes(role)) {
     return { code: 2, messages: [`未知角色：${role}。可用角色：${ROLES.join('|')}`] };
   }
-  if (unit !== null && role !== 'implement' && role !== 'accept') {
+  if (unit !== null && role !== null && role !== 'implement' && role !== 'accept') {
     return {
       code: 2,
-      messages: [
-        role === null
-          ? '--unit 需要与 --role implement 或 accept 一起使用'
-          : `--unit 只用于 implement 或 accept 角色,当前角色为 ${role}`,
-      ],
+      messages: [`--unit 可单独补读,或用于 implement 与 accept 角色,当前角色为 ${role}`],
     };
   }
   if (unit !== null && !UNIT_ID_RE.test(unit)) {
@@ -219,6 +215,8 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   if (role === 'implement' && unit === null) {
     return { code: 2, messages: ['implement 角色必须指定 --unit'] };
   }
+
+  const unitOnly = role === null && unit !== null;
 
   const absDir = resolveTaskDir(root, cwd, target);
   if (absDir === null || !isDir(absDir)) {
@@ -237,7 +235,7 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   const detailsSections = requireSections(task.details.outline, task.details.relPath, roleSpec.required, 'details.md ', issues);
 
   let unitItem = null;
-  if (role === 'implement' || (role === 'accept' && unit !== null)) {
+  if (unit !== null) {
     const hits = task.units.get(unit) ?? [];
     if (hits.length === 0) {
       issues.push({ file: task.details.relPath, reason: `details.md 缺少施工单元 ${unit}` });
@@ -279,7 +277,7 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     };
   }
 
-  const sources = STATE_SECTIONS.map((title) => source('state', title, task.state, stateSections.get(title)));
+  const sources = unitOnly ? [] : STATE_SECTIONS.map((title) => source('state', title, task.state, stateSections.get(title)));
   for (const title of roleSpec.required) {
     const item = detailsSections.get(title);
     if (item) sources.push(source('details', title, task.details, item));
@@ -315,8 +313,8 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     }
   }
 
-  // 无角色时只给 state.md 与阅读路径,不展开必读引用
-  const reading = role === null ? { items: [], issues: [] } : collectReading(root, sources);
+  // 只读 state 时保留阅读路径;角色读集和单元补读从所选正文收集一层必读。
+  const reading = role === null && unit === null ? { items: [], issues: [] } : collectReading(root, sources);
   if (reading.issues.length > 0) {
     return {
       code: 1,
@@ -328,10 +326,13 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   const lines = ['# 接续材料', ''];
   lines.push(`任务：${task.name}`);
   lines.push(`来源目录：${task.relDir}`);
-  lines.push(`角色：${role ?? 'state(仅状态)'}`);
+  lines.push(unitOnly ? `模式：单元补读(${unit})` : `角色：${role ?? 'state(仅状态)'}`);
   lines.push(`阶段：${task.stage ?? '未识别'}`);
   lines.push(`方案版本：${task.version ?? '无'}`);
   lines.push(volumeLine(sources, reading.items));
+  if (unitOnly) {
+    lines.push('已有共享材料直接复用；需要完整角色材料时用 --role，仅缺少、变更或冲突部分材料时按章节补读。');
+  }
   for (const src of sources) {
     lines.push('');
     lines.push('---');

@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { PKG_ROOT } from '../src/lib/paths.mjs';
-import { cleanup, makeTempRoot, simpleTask, writeFiles } from './helpers.mjs';
+import { cleanup, makeTempRoot, simpleTask, unitBlock, writeFiles } from './helpers.mjs';
 
 const CLI = join(PKG_ROOT, 'bin', 'worklog.mjs');
 
@@ -101,6 +101,32 @@ test('context 与 check 的退出码与输出', () => {
   } finally {
     cleanup(root);
   }
+});
+
+test('context 单独 --unit 路由至补读，保留角色完整读集与错误退出码', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask({ units: unitBlock('T2', '当前单元', { 依赖与必读: '无。' }) }));
+    const supplement = run(['context', 'demo', '--unit', 'T2'], root);
+    assert.equal(supplement.code, 0, supplement.err);
+    assert.equal(supplement.err, '');
+    assert.match(supplement.out, /模式：单元补读\(T2\)/);
+    assert.match(supplement.out, /## T2 当前单元/);
+    assert.match(supplement.out, /### 当前结果/);
+    assert.doesNotMatch(supplement.out, /## 当前\n|## 共同约束|## 当前设计/);
+    const complete = run(['context', 'demo', '--unit', 'T2', '--role', 'implement'], root);
+    assert.equal(complete.code, 0, complete.err);
+    assert.match(complete.out, /角色：implement/);
+    assert.match(complete.out, /## 当前\n/);
+    assert.match(complete.out, /## 共同约束/);
+    assert.match(complete.out, /## 当前设计/);
+    for (const [unit, code, diagnostic] of [['X2', 2, /编号格式/], ['T9', 1, /缺少施工单元 T9/]]) {
+      const invalid = run(['context', 'demo', '--unit', unit], root);
+      assert.equal(invalid.code, code);
+      assert.equal(invalid.out, '');
+      assert.match(invalid.err, diagnostic);
+    }
+  } finally { cleanup(root); }
 });
 
 test('init 通过 CLI 导出到默认目录', () => {
