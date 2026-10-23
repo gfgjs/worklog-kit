@@ -1,7 +1,7 @@
 // context 的角色切片、缺项报错、必读片段与去重。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { runContext } from '../src/context.mjs';
 import { runCheck } from '../src/check.mjs';
@@ -178,6 +178,344 @@ test('单元补读的非法编号、缺失、重复、四项结构及所选必�
       assert.equal(result.text, undefined);
       assert.equal(result.sources, undefined);
       assert.match(result.messages.join('\n'), expect);
+    }
+  } finally { cleanup(root); }
+});
+
+test('多锚点补读完整章节,不带入 state、共享材料及未选单元或小节', () => {
+  const root = makeTempRoot();
+  try {
+    const plan = '本章方案。\n#### 边界细节\n细节末行。';
+    const resultBody = '本章结果。\n结果末行。';
+    writeFiles(root, {
+      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', '未选状态正文。\n必读：[未选状态](missing-state.md)'),
+      'docs/tasks/demo/details.md': detailsDoc({
+        design: '方案版本：r1\n未选共享设计正文。\n必读：[未选设计](missing-design.md)',
+        units: unitBlock('T1', '其他单元', { 当前结果: '未选其他单元正文。' }) + '\n'
+          + unitBlock('T2', '选章单元', { 目标与验收: '未选验收正文。', 方案与范围: plan, 当前结果: resultBody }),
+      }),
+    });
+    const result = run(root, { sections: ['方案与范围-1', '#当前结果-1'] });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.deepEqual(titles(result), ['方案与范围', '当前结果']);
+    assert.deepEqual(result.sources.map((src) => src.body), ['### 方案与范围\n' + plan, '### 当前结果\n' + resultBody]);
+    assert.deepEqual(result.readings, []);
+    assert.match(result.text, /模式：章节补读/);
+    assert.match(result.text, /来源：docs\/tasks\/demo\/details.md 的“方案与范围”/);
+    for (const src of result.sources) {
+      assert.ok(result.text.includes(src.body));
+      assert.ok(result.text.includes(`${src.title} ${Buffer.byteLength(src.body, 'utf8')}B`));
+    }
+    assert.doesNotMatch(result.text, /未选|## 共同约束|## 当前设计|## 当前\n|## 进度|## 下一步与阅读|### 依赖与必读/);
+  } finally { cleanup(root); }
+});
+
+test('选章只展开一层显式必读,去重已选章节与重复引用,正常展开共享章节', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/guide.md': '# 指南\n\n## 记录\n指南正文。\n### 附注\n附注末行。\n必读：[第二层](missing-guide.md)\n\n## 其他\n未选指南正文。\n',
+      'docs/tasks/demo/details.md': detailsDoc({
+        design: '方案版本：r1\n显式共享设计正文。\n必读：[第二层](missing-shared.md)',
+        extraSections: [
+          '## 核对点',
+          '必读：[共享设计](#当前设计)',
+          '必读：[共同约束](details.md#共同约束)',
+          '必读：[指南](../../guide.md#记录)',
+          '必读：[已选章节](#补充证据)',
+          '',
+          '## 补充证据',
+          '必读：[共享设计重复](details.md#当前设计)',
+          '必读：[指南重复](../../guide.md#%E8%AE%B0%E5%BD%95)',
+          '必读：[自身](#补充证据)',
+          '[普通指针](missing-pointer.md)',
+        ].join('\n'),
+      }),
+    });
+    const result = run(root, { sections: ['#核对点', '补充证据'] });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.deepEqual(titles(result), ['核对点', '补充证据']);
+    assert.deepEqual(result.readings.map(({ source, target, rel }) => ({ source, target, rel })), [
+      { source: 'docs/tasks/demo/details.md', target: '#当前设计', rel: 'docs/tasks/demo/details.md' },
+      { source: 'docs/tasks/demo/details.md', target: 'details.md#共同约束', rel: 'docs/tasks/demo/details.md' },
+      { source: 'docs/tasks/demo/details.md', target: '../../guide.md#记录', rel: 'docs/guide.md' },
+    ]);
+    for (const heading of ['## 当前设计', '## 共同约束', '## 补充证据', '## 记录']) {
+      assert.equal(result.text.split('\n').filter((line) => line === heading).length, 1, heading);
+    }
+    assert.match(result.text, /显式共享设计正文/);
+    assert.match(result.text, /附注末行/);
+    assert.match(result.text, /来源：docs\/tasks\/demo\/details.md → #当前设计/);
+    assert.doesNotMatch(result.text, /未选指南正文|## 当前\n/);
+    const bytes = result.readings.reduce((sum, item) => sum + Buffer.byteLength(item.body, 'utf8'), 0);
+    assert.ok(result.text.includes(`一层必读 3 段 ${bytes}B`));
+  } finally { cleanup(root); }
+});
+
+test('选章沿用中文、同名标题编号、百分号编码、大小写和围栏解析', () => {
+  const root = makeTempRoot();
+  try {
+    const first = [
+      '## 中文 标题！', '第一处正文。', '```md', '## 中文 标题！',
+      '必读：[围栏示例](missing-fenced.md)', '```', '第一处末行。',
+    ].join('\n');
+    const second = '## 中文 标题！\n第二处正文。';
+    const api = '## API Case\nASCII 正文。';
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/tasks/demo/details.md': ['# 详情', first, second, api, ''].join('\r\n\r\n'),
+    });
+    const result = run(root, { sections: ['#' + encodeURIComponent('中文-标题-1'), '中文-标题', '#API-CASE'] });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.deepEqual(result.sources.map((src) => src.body), [second, first, api]);
+    assert.deepEqual(result.readings, []);
+    const origins = result.text.split('\n');
+    assert.ok(origins.includes('来源：docs/tasks/demo/details.md 的“中文 标题！” #中文-标题-1'));
+    assert.ok(origins.includes('来源：docs/tasks/demo/details.md 的“中文 标题！” #中文-标题'));
+  } finally { cleanup(root); }
+});
+
+test('选章遇未知或真实冲突锚点时全部报错,父章覆盖也不跳过错误校验', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/tasks/demo/details.md': [
+        '# 详情', '## 可读', '可读正文。', '## 重复标题', '甲。',
+        '## 重复标题', '乙。', '## 重复标题-1', '丙。',
+        '~~~md', '## 围栏伪标题', '~~~',
+      ].join('\n'),
+    });
+    for (const [sections, diagnostic] of [
+      [['可读', '不存在'], /片段不存在.*#不存在/],
+      [['可读', '围栏伪标题'], /片段不存在.*#围栏伪标题/],
+      [['可读', '#重复标题-1'], /定位不唯一.*#重复标题-1.*命中 2 处/],
+      [['详情', '重复标题-1'], /定位不唯一/],
+    ]) {
+      const result = run(root, { sections });
+      assert.equal(result.code, 1, sections.join(', '));
+      assert.equal(result.text, undefined);
+      assert.equal(result.sources, undefined);
+      assert.match(result.messages.join('\n'), diagnostic);
+      assert.equal(result.issues[0].file, 'docs/tasks/demo/details.md');
+    }
+    writeFiles(root, { 'docs/tasks/demo/details.md': '# 详情\n## 补读\n必读：[缺失](#不存在)\n' });
+    const reading = run(root, { sections: ['补读'] });
+    assert.equal(reading.code, 1);
+    assert.equal(reading.text, undefined);
+    assert.match(reading.messages.join('\n'), /必读片段不存在/);
+  } finally { cleanup(root); }
+});
+
+test('重复选章与父子选章按完整区间去重,选择顺序不影响父章覆盖', () => {
+  const root = makeTempRoot();
+  try {
+    const parent = '## 专题\n父章正文。\n### 子节\n子节正文。\n#### 更深\n子节末行。\n必读：[已覆盖子节](#子节)';
+    const independent = '## 独立\n独立正文。';
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/tasks/demo/details.md': '# 详情\n' + parent + '\n\n' + independent + '\n',
+    });
+    for (const [sections, expected] of [
+      [['专题', '#专题', '子节', '更深'], [parent]],
+      [['子节', '独立', '#专题', '子节'], [independent, parent]],
+      [['更深', '子节', '#子节'], [parent.slice(parent.indexOf('### 子节'))]],
+    ]) {
+      const result = run(root, { sections });
+      assert.equal(result.code, 0, result.messages?.join('\n'));
+      assert.deepEqual(result.sources.map((src) => src.body), expected);
+      assert.deepEqual(result.readings, []);
+      assert.equal(result.text.split('\n').filter((line) => line === '### 子节').length, 1);
+      assert.equal(result.text.split('\n').filter((line) => line === '子节末行。').length, 1);
+    }
+  } finally { cleanup(root); }
+});
+
+test('必读父章覆盖所选子节,仍保留原选子节的一层必读且不展开父章其他引用', () => {
+  const root = makeTempRoot();
+  try {
+    const parent = [
+      '## 专题', '父章正文。', '### 子节', '子节正文。',
+      '必读：[父章](#专题)', '必读：[指南](../../guide.md#要点)',
+      '### 旁支', '旁支正文。', '必读：[第二层](missing-sibling.md)',
+    ].join('\n');
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/guide.md': '# 指南\n## 要点\n指南正文。\n必读：[第二层](missing-guide.md)\n',
+      'docs/tasks/demo/details.md': '# 详情\n' + parent + '\n## 独立\n独立正文。\n',
+    });
+    const result = run(root, { sections: ['子节', '独立'] });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.deepEqual(titles(result), ['独立']);
+    assert.deepEqual(result.readings.map((item) => item.target), ['#专题', '../../guide.md#要点']);
+    assert.equal(result.readings[0].body, parent);
+    assert.match(result.readings[1].body, /指南正文/);
+    for (const line of ['## 专题', '### 子节', '子节正文。', '旁支正文。', '指南正文。']) {
+      assert.equal(result.text.split('\n').filter((value) => value === line).length, 1, line);
+    }
+    assert.match(result.text, /来源：docs\/tasks\/demo\/details.md → #专题/);
+    assert.equal(result.text.split('\n').find((line) => line.startsWith('正文体积(')), volumeLine(result.sources, result.readings));
+  } finally { cleanup(root); }
+});
+
+test('相等完整区间优先显式所选章节,整份必读与自身引用不重复输出', () => {
+  const root = makeTempRoot();
+  try {
+    const body = '# 详情\n## 子节\n子节正文。\n必读：[整份](details.md)\n必读：[自身](#详情)';
+    writeFiles(root, { ...simpleTask(), 'docs/tasks/demo/details.md': body + '\n' });
+    for (const sections of [['详情'], ['子节', '详情'], ['详情', '子节', '#详情']]) {
+      const result = run(root, { sections });
+      assert.equal(result.code, 0, result.messages?.join('\n'));
+      assert.deepEqual(titles(result), ['详情']);
+      assert.equal(result.sources[0].body, body);
+      assert.deepEqual(result.readings, []);
+      assert.equal(result.text.split('\n').filter((line) => line === '子节正文。').length, 1);
+      assert.doesNotMatch(result.text, /一层必读|来源：.* → /);
+    }
+  } finally { cleanup(root); }
+});
+
+test('必读父子章节按完整区间去重,引用顺序与章节、单元及角色模式不影响覆盖', () => {
+  const root = makeTempRoot();
+  try {
+    const parent = '## 父章\n父章正文。\n### 子节\n子节正文。\n#### 深节\n末尾正文。\n必读：[第二层](missing.md)';
+    const references = ['必读：[子节](../../guide.md#子节)', '必读：[父章](../../guide.md#父章)'];
+    for (const lines of [references, [...references].reverse()]) {
+      writeFiles(root, {
+        ...simpleTask({ units: unitBlock('T1', '示例单元', { 依赖与必读: '无。', 当前结果: lines.join('\n') }) }),
+        'docs/guide.md': '# 指南\n' + parent + '\n## 无关\n无关正文。\n',
+      });
+      for (const args of [{ sections: ['当前结果'] }, { unit: 'T1' }, { role: 'implement', unit: 'T1' }, { role: 'accept', unit: 'T1' }, { role: 'accept' }]) {
+        const result = run(root, args);
+        assert.equal(result.code, 0, result.messages?.join('\n'));
+        assert.equal(result.readings.length, 1, JSON.stringify(args));
+        assert.equal(result.readings[0].target, '../../guide.md#父章');
+        assert.equal(result.readings[0].body, parent);
+        assert.equal(result.text.split('\n').filter((line) => line === '子节正文。').length, 1);
+        assert.doesNotMatch(result.text, /无关正文/);
+        assert.equal(result.text.split('\n').find((line) => line.startsWith('正文体积(')), volumeLine(result.sources, result.readings));
+      }
+    }
+  } finally { cleanup(root); }
+});
+
+test('整份必读覆盖同文件所选和必读片段,原选读集的一层必读仍完整保留', () => {
+  const root = makeTempRoot();
+  try {
+    const details = detailsDoc({
+      units: unitBlock('T1', '示例单元', {
+        依赖与必读: '必读：[共享设计](#当前设计)',
+        当前结果: '必读：[整份详情](details.md)\n必读：[指南](../../guide.md#要点)',
+      }),
+      extraSections: '## 未选章\n必读：[第二层](missing.md)\n',
+    });
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/tasks/demo/details.md': details,
+      'docs/guide.md': '# 指南\n## 要点\n指南正文。\n',
+    });
+    for (const args of [{ sections: ['当前结果'] }, { unit: 'T1' }, { role: 'implement', unit: 'T1' }, { role: 'accept', unit: 'T1' }, { role: 'accept' }]) {
+      const result = run(root, args);
+      assert.equal(result.code, 0, result.messages?.join('\n'));
+      assert.ok(result.sources.every((src) => src.relPath === 'docs/tasks/demo/state.md'), JSON.stringify(args));
+      assert.equal(result.sources.length, args.role ? 3 : 0);
+      assert.deepEqual(result.readings.map((item) => item.target), ['details.md', '../../guide.md#要点']);
+      assert.equal(result.readings[0].body, details.trimEnd());
+      assert.equal(result.readings[0].source, 'docs/tasks/demo/details.md');
+      assert.equal(result.readings[0].rel, 'docs/tasks/demo/details.md');
+      for (const line of ['## 当前设计', '## T1 示例单元', '### 当前结果', '指南正文。']) {
+        assert.equal(result.text.split('\n').filter((value) => value === line).length, 1, line);
+      }
+      assert.equal(result.text.split('\n').find((line) => line.startsWith('正文体积(')), volumeLine(result.sources, result.readings));
+    }
+  } finally { cleanup(root); }
+});
+
+test('整份文件覆盖也必须校验原选子节的未知、歧义与无效必读,错误原子返回', () => {
+  const root = makeTempRoot();
+  try {
+    for (const [invalid, diagnostic] of [
+      ['必读：[未知](#不存在)', /必读片段不存在/],
+      ['必读：[歧义](#重复-1)', /必读片段定位不唯一/],
+      ['必读：[源码](a.mjs)', /源码等材料请用普通指针/],
+      ['必读：[缺失](missing.md)', /必读引用无法解析/],
+      ['必读：没有链接', /必读标记缺少链接/],
+    ]) {
+      const whole = '必读：[整份](details.md)';
+      for (const lines of [[whole, invalid], [invalid, whole]]) {
+        writeFiles(root, {
+          ...simpleTask(),
+          'docs/tasks/demo/details.md': [
+            '# 详情', '## 子节', ...lines,
+            '## 重复', '甲。', '## 重复', '乙。', '## 重复-1', '丙。',
+          ].join('\n'),
+        });
+        const result = run(root, { sections: ['子节'] });
+        assert.equal(result.code, 1, lines.join('\n'));
+        assert.equal(result.text, undefined);
+        assert.equal(result.sources, undefined);
+        assert.equal(result.readings, undefined);
+        assert.match(result.messages.join('\n'), diagnostic);
+      }
+    }
+  } finally { cleanup(root); }
+});
+
+test('长选章保留完整末尾,体积摘要按完整正文计数', () => {
+  const root = makeTempRoot();
+  try {
+    const body = '## 长章\n' + '长章正文。\n'.repeat(3000) + '### 末段\n长章结尾标记。';
+    writeFiles(root, {
+      ...simpleTask(),
+      'docs/tasks/demo/details.md': '# 详情\n' + body + '\n\n## 其他\n未选正文。\n',
+    });
+    const result = run(root, { sections: ['长章'] });
+    assert.equal(result.code, 0, result.messages?.join('\n'));
+    assert.equal(result.sources[0].body, body);
+    assert.ok(result.text.includes(body));
+    assert.ok(result.text.includes(`长章 ${Buffer.byteLength(body, 'utf8')}B`));
+    assert.doesNotMatch(result.text, /未选正文/);
+  } finally { cleanup(root); }
+});
+
+test('精确选章允许 state 缺节与单元未完成,仍要求两份核心文件存在', () => {
+  const root = makeTempRoot();
+  try {
+    for (const state of ['', '# 未填写状态\n']) {
+      writeFiles(root, {
+        'docs/tasks/demo/state.md': state,
+        'docs/tasks/demo/details.md': '# 详情\n## T1 施工中\n### 方案与范围\n可精确补读正文。\n### 当前结果\n待定\n',
+      });
+      const result = run(root, { sections: ['方案与范围', '当前结果'] });
+      assert.equal(result.code, 0, result.messages?.join('\n'));
+      assert.deepEqual(titles(result), ['方案与范围', '当前结果']);
+      assert.equal(result.sources[1].body, '### 当前结果\n待定');
+      assert.doesNotMatch(result.text, /未填写状态/);
+    }
+    for (const missing of ['state.md', 'details.md']) {
+      writeFiles(root, simpleTask());
+      rmSync(join(root, 'docs/tasks/demo', missing));
+      const result = run(root, { target: 'docs/tasks/demo', sections: ['当前设计'] });
+      assert.equal(result.code, 1);
+      assert.equal(result.text, undefined);
+      assert.ok(result.messages.join('\n').includes(`缺少核心文件：${missing}`));
+    }
+  } finally { cleanup(root); }
+});
+
+test('选章与角色、单元、列表互斥且必须指定任务', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask());
+    for (const args of [
+      { role: 'explore' }, { role: 'implement', unit: 'T1' }, { unit: 'T1' },
+      { list: true }, { target: null, list: true }, { target: null },
+    ]) {
+      const result = run(root, { sections: ['当前设计'], ...args });
+      assert.equal(result.code, 2);
+      assert.equal(result.text, undefined);
+      assert.match(result.messages.join('\n'), /--section/);
     }
   } finally { cleanup(root); }
 });
@@ -564,6 +902,7 @@ test('整体accept同文件锚点:父单元完整展开,已含子段不重复', 
   try {
     writeFiles(root, simpleTask({
       units: unitBlock('T1', '示例单元', {
+        方案与范围: '父单元方案正文。\n必读：[方案二层](missing-plan.md)',
         依赖与必读: '必读：[本单元](#t1-示例单元)\n必读：[本单元结果](#当前结果)',
       }),
     }));
@@ -573,6 +912,11 @@ test('整体accept同文件锚点:父单元完整展开,已含子段不重复', 
     assert.ok(whole, '整体验收只选三小节,指向父单元的必读应完整展开');
     assert.ok(whole.body.includes('### 方案与范围'), '父单元展开应含方案小节');
     assert.equal(result.readings.length, 1, '已选子段“当前结果”去重,只注入父单元一份');
+    assert.deepEqual(result.sources.filter((src) => src.kind === 'unit'), [], '父单元已完整包含所选三小节');
+    for (const title of ['目标与验收', '方案与范围', '依赖与必读', '当前结果']) {
+      assert.equal(result.text.split('\n').filter((line) => line === `### ${title}`).length, 1, title);
+    }
+    assert.equal(result.text.split('\n').find((line) => line.startsWith('正文体积(')), volumeLine(result.sources, result.readings));
   } finally {
     cleanup(root);
   }
@@ -700,25 +1044,30 @@ test('必读不越出仓根', () => {
   }
 });
 
-test('无锚点的必读取整份文件,有锚点只取该片段', () => {
+test('无锚点必读取整份文件并覆盖同文件片段,仅有锚点时只取该片段', () => {
   const root = makeTempRoot();
   try {
     writeFiles(root, {
       'docs/guide.md': '# 指南\n\n导言段。\n\n## 要点\n\n要点内容。\n\n## 无关\n\n无关内容。\n',
-      'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', [
-        '继续 T1。',
-        '必读：[整份材料](../../guide.md)',
-        '必读：[指南片段](../../guide.md#要点)',
-      ].join('\n')),
       'docs/tasks/demo/details.md': detailsDoc({ units: unitBlock('T1', '单元') }),
     });
-    const result = run(root, { role: 'implement', unit: 'T1' });
-    assert.equal(result.code, 0, result.messages?.join('\n'));
-    assert.equal(result.readings.length, 2);
-    assert.ok(result.readings[0].body.includes('导言段'));
-    assert.ok(result.readings[0].body.includes('无关内容'), '无锚点应取全文');
-    assert.ok(result.readings[1].body.includes('要点内容'));
-    assert.ok(!result.readings[1].body.includes('无关内容'), '有锚点只取该片段');
+    const whole = '必读：[整份材料](../../guide.md)';
+    const section = '必读：[指南片段](../../guide.md#要点)';
+    for (const lines of [[whole, section], [section, whole], [section]]) {
+      writeFiles(root, { 'docs/tasks/demo/state.md': stateDoc().replace('继续 T1。', lines.join('\n')) });
+      const result = run(root, { role: 'implement', unit: 'T1' });
+      assert.equal(result.code, 0, result.messages?.join('\n'));
+      assert.equal(result.readings.length, 1);
+      assert.match(result.readings[0].body, /要点内容/);
+      if (lines.includes(whole)) {
+        assert.match(result.readings[0].body, /导言段/);
+        assert.match(result.readings[0].body, /无关内容/);
+        assert.equal(result.readings[0].target, '../../guide.md');
+      } else {
+        assert.doesNotMatch(result.readings[0].body, /导言段|无关内容/);
+      }
+      assert.equal(result.text.split('\n').filter((line) => line === '要点内容。').length, 1);
+    }
   } finally {
     cleanup(root);
   }

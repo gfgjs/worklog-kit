@@ -1,4 +1,4 @@
-// context:按任务与角色提取接续材料。只读,不写任何持久状态。
+// context:按任务、角色或章节提取接续材料。只读,不写任何持久状态。
 // 输出中文直出消息,不引入配置层或语言包契约。
 import { lstatSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -43,6 +43,26 @@ function decode(value) {
   }
 }
 
+/** 按现有锚点规则定位唯一章节;必读与按章补读共用诊断。 */
+function resolveSection(outline, relPath, anchor, label) {
+  const hits = anchorMap(outline.items).get(anchor) ?? [];
+  if (hits.length === 0) {
+    return { reason: `${label}片段不存在：${relPath}#${anchor}` };
+  }
+  if (hits.length > 1) {
+    return { reason: `${label}片段定位不唯一：${relPath}#${anchor} 命中 ${hits.length} 处` };
+  }
+  return { item: hits[0] };
+}
+
+/** 同文件只保留最大的完整区间;相等区间保留先出现的一份。 */
+function maximalRanges(items) {
+  return items.filter((item, index) => !items.some((other, otherIndex) =>
+    other.absPath === item.absPath && other.start <= item.start && other.end >= item.end
+    && (other.start < item.start || other.end > item.end || otherIndex < index),
+  ));
+}
+
 /** 列出 docs/tasks 下未完成的任务;完成与已取消需显式指定任务名查看。 */
 export function listTasks(root) {
   const tasksDir = join(root, 'docs', 'tasks');
@@ -73,13 +93,6 @@ export function listTasks(root) {
 function collectReading(root, sources) {
   const items = [];
   const issues = [];
-  // 已选章节按文件登记完整行区间,用于判断必读片段是否已包含。
-  const selected = new Map();
-  for (const s of sources) {
-    if (!selected.has(s.absPath)) selected.set(s.absPath, []);
-    selected.get(s.absPath).push({ start: s.start, end: s.end });
-  }
-  const seen = new Set();
   for (const src of sources) {
     const base = dirname(src.absPath);
     const inFence = makeFenceTracker();
@@ -125,30 +138,20 @@ function collectReading(root, sources) {
         }
       }
       const rel = relToRoot(root, absPath);
+      const text = readText(absPath);
+      const outline = buildOutline(text);
       let resolved;
       if (anchor === null) {
-        resolved = { body: readText(absPath).replace(/\s+$/, ''), title: null };
+        resolved = { body: text.replace(/\s+$/, ''), start: 1, end: outline.lines.length };
       } else {
-        const outline = buildOutline(readText(absPath));
-        const hits = anchorMap(outline.items).get(anchor) ?? [];
-        if (hits.length === 0) {
-          issues.push({ file: src.relPath, reason: `必读片段不存在：${rel}#${anchor}` });
+        const { item, reason } = resolveSection(outline, rel, anchor, '必读');
+        if (!item) {
+          issues.push({ file: src.relPath, reason });
           return;
         }
-        if (hits.length > 1) {
-          issues.push({ file: src.relPath, reason: `必读片段定位不唯一：${rel}#${anchor} 命中 ${hits.length} 处` });
-          return;
-        }
-        resolved = { body: sectionText(outline, hits[0]), title: hits[0].title, ...hits[0] };
+        resolved = { body: sectionText(outline, item), title: item.title, ...item };
       }
-      // 已在所选章节中完整出现的章节不再重复注入:完整区间包含才去重
-      const ranges = selected.get(absPath);
-      if (ranges && resolved.start !== undefined && ranges.some((r) => resolved.start >= r.start && resolved.end <= r.end)) return;
-      // 同名标题的不同编号锚点是不同片段,去重按锚点而不是标题
-      const key = `${absPath}#${anchor ?? ''}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      items.push({ source: src.relPath, target: raw, rel, body: resolved.body });
+      items.push({ source: src.relPath, target: raw, rel, absPath, start: resolved.start, end: resolved.end, body: resolved.body });
     });
   }
   return { items, issues };
@@ -187,7 +190,11 @@ function workIndex(root) {
   }
 }
 
-export function runContext({ root, cwd, target = null, role = null, unit = null, list = false }) {
+export function runContext({ root, cwd, target = null, role = null, unit = null, list = false, sections = [] }) {
+  const sectionOnly = sections.length > 0;
+  if (sectionOnly && (role !== null || unit !== null || list)) {
+    return { code: 2, messages: ['--section 与 --role、--unit、--list 互斥'] };
+  }
   if (list) {
     if (target !== null || role !== null || unit !== null) {
       return { code: 2, messages: ['--list 与任务参数、--role、--unit 互斥'] };
@@ -195,6 +202,7 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     return { code: 0, text: listTasks(root).text };
   }
   if (target === null) {
+    if (sectionOnly) return { code: 2, messages: ['--section 需要指定任务'] };
     if (role !== null || unit !== null) {
       return { code: 2, messages: ['--role 或 --unit 需要指定任务'] };
     }
@@ -230,7 +238,14 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
 
   const task = loadTask(root, absDir, relDir);
   const issues = [];
-  const stateSections = requireSections(task.state.outline, task.state.relPath, STATE_SECTIONS, 'state.md ', issues);
+  const sectionItems = [];
+  for (const raw of sections) {
+    const anchor = decode(raw.replace(/^#/, '')).toLowerCase();
+    const { item, reason } = resolveSection(task.details.outline, task.details.relPath, anchor, '所选');
+    if (item) sectionItems.push({ item, anchor });
+    else issues.push({ file: task.details.relPath, reason });
+  }
+  const stateSections = sectionOnly ? new Map() : requireSections(task.state.outline, task.state.relPath, STATE_SECTIONS, 'state.md ', issues);
   const roleSpec = ROLE_DETAILS[role] ?? { required: [], optional: [] };
   const detailsSections = requireSections(task.details.outline, task.details.relPath, roleSpec.required, 'details.md ', issues);
 
@@ -277,10 +292,13 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     };
   }
 
-  const sources = unitOnly ? [] : STATE_SECTIONS.map((title) => source('state', title, task.state, stateSections.get(title)));
+  const selectedSources = sectionOnly || unitOnly ? [] : STATE_SECTIONS.map((title) => source('state', title, task.state, stateSections.get(title)));
+  for (const { item, anchor } of sectionItems) {
+    selectedSources.push({ ...source('details', item.title, task.details, item), anchor });
+  }
   for (const title of roleSpec.required) {
     const item = detailsSections.get(title);
-    if (item) sources.push(source('details', title, task.details, item));
+    if (item) selectedSources.push(source('details', title, task.details, item));
   }
   for (const title of roleSpec.optional) {
     const hits = findSections(task.details.outline, 2, title);
@@ -290,16 +308,16 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
         messages: [`details.md 章节“${title}”重复出现 ${hits.length} 次,定位不唯一,未输出执行材料。`],
       };
     }
-    if (hits.length === 1) sources.push(source('details', title, task.details, hits[0]));
+    if (hits.length === 1) selectedSources.push(source('details', title, task.details, hits[0]));
   }
-  if (unitItem) sources.push(source('unit', unitItem.title, task.details, unitItem));
+  if (unitItem) selectedSources.push(source('unit', unitItem.title, task.details, unitItem));
   const planPointers = [];
   if (role === 'accept' && unit === null) {
     for (const [id, hits] of task.units) {
       if (hits.length !== 1) continue; // 重复与缺项已在 issues 报告
       for (const title of ACCEPT_UNIT_SECTIONS) {
         const found = findChild(task.details.outline, hits[0], 3, title);
-        if (found.length === 1) sources.push(source('unit', `${id} ${title}`, task.details, found[0]));
+        if (found.length === 1) selectedSources.push(source('unit', `${id} ${title}`, task.details, found[0]));
       }
     }
     // 方案与范围不进整体验收读集,给每单元真实锚点指针定位;指针只指向该片段,不代表单元全文
@@ -313,8 +331,8 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     }
   }
 
-  // 只读 state 时保留阅读路径;角色读集和单元补读从所选正文收集一层必读。
-  const reading = role === null && unit === null ? { items: [], issues: [] } : collectReading(root, sources);
+  // 只读 state 时保留阅读路径;角色读集、单元和章节补读从所选正文收集一层必读。
+  const reading = role === null && unit === null && !sectionOnly ? { items: [], issues: [] } : collectReading(root, selectedSources);
   if (reading.issues.length > 0) {
     return {
       code: 1,
@@ -323,28 +341,32 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
     };
   }
 
+  // 先校验原选读集的一层必读,再统一去重;显式选择排在前面,相等区间优先保留。
+  const fragments = maximalRanges([...selectedSources, ...reading.items]);
+  const sources = fragments.filter((item) => item.kind);
+  const readings = fragments.filter((item) => !item.kind);
   const lines = ['# 接续材料', ''];
   lines.push(`任务：${task.name}`);
   lines.push(`来源目录：${task.relDir}`);
-  lines.push(unitOnly ? `模式：单元补读(${unit})` : `角色：${role ?? 'state(仅状态)'}`);
+  lines.push(sectionOnly ? '模式：章节补读' : unitOnly ? `模式：单元补读(${unit})` : `角色：${role ?? 'state(仅状态)'}`);
   lines.push(`阶段：${task.stage ?? '未识别'}`);
   lines.push(`方案版本：${task.version ?? '无'}`);
-  lines.push(volumeLine(sources, reading.items));
+  lines.push(volumeLine(sources, readings));
   if (unitOnly) {
     lines.push('已有共享材料直接复用；需要完整角色材料时用 --role，仅缺少、变更或冲突部分材料时按章节补读。');
   }
   for (const src of sources) {
     lines.push('');
     lines.push('---');
-    lines.push(`来源：${src.relPath} 的“${src.title}”`);
+    lines.push(`来源：${src.relPath} 的“${src.title}”${src.anchor ? ` #${src.anchor}` : ''}`);
     lines.push('');
     lines.push(src.body);
   }
-  if (reading.items.length > 0) {
+  if (readings.length > 0) {
     lines.push('');
     lines.push('---');
     lines.push('必读片段(仅一层,不递归展开):');
-    for (const item of reading.items) {
+    for (const item of readings) {
       lines.push('');
       lines.push(`来源：${item.source} → ${item.target}`);
       lines.push('');
@@ -363,7 +385,7 @@ export function runContext({ root, cwd, target = null, role = null, unit = null,
   if (role === 'accept') {
     lines.push('验收者须按相关条件补读方案、差异与真实证据;以上摘录与摘要不能单独证明通过。');
   }
-  return { code: 0, text: lines.join('\n'), sources, readings: reading.items };
+  return { code: 0, text: lines.join('\n'), sources, readings };
 }
 
 function source(kind, title, doc, item) {

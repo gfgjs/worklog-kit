@@ -129,6 +129,54 @@ test('context 单独 --unit 路由至补读，保留角色完整读集与错误�
   } finally { cleanup(root); }
 });
 
+test('context 可重复 --section 选章并传递锚点错误退出码', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask({ units: unitBlock('T2', '当前单元', {
+      方案与范围: '选中方案正文。', 当前结果: '选中结果末行。',
+    }) }));
+    const result = run(['context', '--section', '#方案与范围', 'demo', '--section', '当前结果', '--section', '方案与范围'], root);
+    assert.equal(result.code, 0, result.err);
+    assert.equal(result.err, '');
+    assert.match(result.out, /模式：章节补读/);
+    assert.match(result.out, /选中方案正文/);
+    assert.match(result.out, /选中结果末行/);
+    assert.equal(result.out.split('\n').filter((line) => line === '### 方案与范围').length, 1);
+    assert.doesNotMatch(result.out, /## 当前\n|## 共同约束|## 当前设计|### 目标与验收|### 依赖与必读/);
+    const missing = run(['context', 'demo', '--section', '方案与范围', '--section', '不存在'], root);
+    assert.equal(missing.code, 1);
+    assert.equal(missing.out, '');
+    assert.match(missing.err, /片段不存在/);
+    writeFiles(root, { 'docs/tasks/demo/details.md': '# 详情\n## 同名\n甲\n## 同名\n乙\n## 同名-1\n丙\n' });
+    const ambiguous = run(['context', 'demo', '--section', '同名-1'], root);
+    assert.equal(ambiguous.code, 1);
+    assert.equal(ambiguous.out, '');
+    assert.match(ambiguous.err, /定位不唯一/);
+  } finally { cleanup(root); }
+});
+
+test('context --section 拒绝互斥参数、缺任务及缺参数值', () => {
+  const root = makeTempRoot();
+  try {
+    writeFiles(root, simpleTask());
+    for (const [args, diagnostic] of [
+      [['demo', '--section', '当前设计', '--role', 'design'], /互斥/],
+      [['demo', '--unit', 'T1', '--section', '当前设计'], /互斥/],
+      [['demo', '--section', '当前设计', '--list'], /互斥/],
+      [['--list', '--section', '当前设计'], /互斥/],
+      [['--section', '当前设计'], /需要指定任务/],
+      [['demo', '--section'], /--section 缺少参数值/],
+      [['demo', '--section', '--unit', 'T1'], /--section 缺少参数值/],
+      [['demo', '--section', '当前设计', '--section'], /--section 缺少参数值/],
+    ]) {
+      const result = run(['context', ...args], root);
+      assert.equal(result.code, 2, args.join(' '));
+      assert.equal(result.out, '');
+      assert.match(result.err, diagnostic);
+    }
+  } finally { cleanup(root); }
+});
+
 test('init 通过 CLI 导出到默认目录', () => {
   const root = makeTempRoot();
   try {
