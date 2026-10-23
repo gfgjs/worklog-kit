@@ -11,7 +11,7 @@
 2026-10-24 对[真实会话](codex://threads/01a16a58-d67a-7a91-99be-7661ecc64cc4)的核对发现：r6 已要求复用，仍有同上下文重读入口、派工给概述和宽泛文件指针后执行者整读 details 的行为；context 缺少精确选章入口。r7 据此简化入口、改派工载体并补齐工具能力。
 
 ## 共同约束
-仅使用普通 Markdown 与既有 init/context/check；不增加运行依赖、持久状态、自动摘要、已读缓存或截断。state 唯一维护进度；当前结果不镜像状态枚举。历史文件和失败证据继续可达；未验证不转为通过。保留工作树原有 package.json/package-lock.json 变更。只迁移本仓库；已完成任务保留原状态，迁移不追认新的验收。
+仅使用普通 Markdown 与既有 init/context/check；不增加运行依赖、持久状态、自动摘要、已读缓存或截断。state 唯一维护进度；当前结果不镜像状态枚举。历史文件和失败证据继续可达；未验证不转为通过。保留其他既有未提交改动。本次允许同步已有 Skill 项目并发布 npm 包；已完成任务保留原状态，迁移不追认新的验收。
 
 ## 当前设计
 方案版本：r7
@@ -66,3 +66,17 @@ src、bin、test。共用单元解析与检查，调整角色切片及体积提�
 验证：工作树 context/cli 65 通过、1 项既有符号链接测试因 Windows 权限跳过；独立提交快照全量 96 项通过、0 跳过。快照 docs 28 份及 README/Skill/角色/模板 11 份引用检查、Skill 校验和差异检查通过，两份 Skill 各 10 文件一致。
 
 隔离派工样例 3 项测试通过，实际调用未重读任务记录或角色说明；长会话重读率与 token 净收益待对照。r6 证据见[历史记录](references/r6-validation.md#当前结果)。
+
+## T5 Skill 同步与工具发布
+### 目标与验收
+同步 C:\workspace 下已安装 worklog 的项目，逐文件内容一致；发布 worklog-kit@0.3.0，线上包指纹与验证过的 tarball 一致，安装后的版本、选章、角色读取、check 与 init 可用。
+### 方案与范围
+发布使用已复核提交 65c33fa 的工具代码与当前 Skill；更新版本和说明，发布已验证的同一 tarball 到 npm latest。仅同步已有 Skill 安装目录，保留其他项目文件及本仓库其他未提交改动。
+### 依赖与必读
+使用本机 npm 登录授权。源码与测试路径相对仓根：package.json、bin、src、skills/worklog、test。
+### 当前结果
+2026-10-24 已同步 moshu、scrollery-private、worklog-kit 的 .agents/skills/worklog，每份 10 文件与源逐文件 SHA-256 一致，无额外文件。覆盖前备份在临时目录 worklog-skill-sync-20261024-062407。
+
+0.3.0 隔离发布源码 96 项测试全通过；22 文件安装包通过版本、多锚点去重、缺失锚点、角色读取、check、init 和 Skill 哈希实测。tarball SHA-1：0a00da44cd2e7d107499bebc31994f8ca90c2f57。发布材料在 C:/Users/gf/AppData/Local/Temp/worklog-release-0.3.0-2npw5f9r，发布对象为其中 worklog-kit-0.3.0.tgz。
+
+npm publish 返回 ENEEDAUTH，尚未发布；网页登录进程已结束。本机完成 npm login 后可发布已验证的 tarball，再核对 registry 指纹、做线上安装实测并标记版本。

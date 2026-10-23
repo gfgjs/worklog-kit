@@ -126,7 +126,7 @@ Markdown 识别是够用即止的最小实现，不是通用解析器。支持�
 
 ## 实现状态
 
-三个入口已实现（入口 `bin/worklog.mjs`，包内只分发 `bin`、`src`、`skills`），CLI 仅使用 Node 内置模块。当前源码支持四组单元、角色与单元读集、按锚点选章、一层必读与体积提示；验证与验收记录见[优化任务](tasks/2026-09-22-精简记录与接续/state.md)。npm 已发布版本仍为 0.2.1，采用旧八项单元和旧验收读集，不支持 `accept --unit`。从源码运行：
+三个入口已实现（入口 `bin/worklog.mjs`，包内只分发 `bin`、`src`、`skills`），CLI 仅使用 Node 内置模块。当前源码支持四组单元、角色与单元读集、按锚点选章、一层必读与体积提示；验证与验收记录见[优化任务](tasks/2026-09-22-精简记录与接续/state.md)。从源码运行：
 
 ```bash
 node /绝对路径/worklog-kit/bin/worklog.mjs --help
