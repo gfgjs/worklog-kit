@@ -77,6 +77,6 @@ src、bin、test。共用单元解析与检查，调整角色切片及体积提�
 ### 当前结果
 2026-10-24 已同步 moshu、scrollery-private、worklog-kit 的 .agents/skills/worklog，每份 10 文件与源逐文件 SHA-256 一致，无额外文件。覆盖前备份在临时目录 worklog-skill-sync-20261024-062407。
 
-0.3.0 隔离发布源码 96 项测试全通过；22 文件安装包通过版本、多锚点去重、缺失锚点、角色读取、check、init 和 Skill 哈希实测。tarball SHA-1：0a00da44cd2e7d107499bebc31994f8ca90c2f57。发布材料在 C:/Users/gf/AppData/Local/Temp/worklog-release-0.3.0-2npw5f9r，发布对象为其中 worklog-kit-0.3.0.tgz。
+0.3.0 隔离发布源码 96 项测试全通过。tarball SHA-1：0a00da44cd2e7d107499bebc31994f8ca90c2f57。发布材料在 C:/Users/gf/AppData/Local/Temp/worklog-release-0.3.0-2npw5f9r，发布对象为其中 worklog-kit-0.3.0.tgz。
 
-npm publish 返回 ENEEDAUTH，尚未发布；网页登录进程已结束。本机完成 npm login 后可发布已验证的 tarball，再核对 registry 指纹、做线上安装实测并标记版本。
+2026-10-24 [worklog-kit@0.3.0](https://www.npmjs.com/package/worklog-kit/v/0.3.0) 已发布到 npm latest。线上下载的 tarball 与验证包逐字节一致，SHA-1/SHA-512 均匹配。使用独立目录与缓存从 registry 安装后，版本、多锚点去重、缺失锚点、施工角色、check、init 均通过；22 个安装文件与验证包一致，包内及 init 导出的 10 个 Skill 文件与源一致。发布源码提交为 ccfc884，版本标签为 v0.3.0。
